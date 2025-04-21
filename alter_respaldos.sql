@@ -1,0 +1,1 @@
+ALTER TABLE respaldos MODIFY COLUMN ruta_archivo LONGTEXT;

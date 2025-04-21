@@ -1,0 +1,89 @@
+.layout-navbar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: calc(100% - 500px); /* Maximum reduction to ensure no overlap */
+    margin-left: 350px; /* Increased margin for perfect alignment */
+    z-index: 1;
+    background: #fff;
+    padding: 0.75rem 0;
+    transition: 0.3s ease-in-out;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}
+
+.layout-page {
+    padding-top: 75px;
+    min-height: 100vh;
+    margin-left: 250px;
+    width: calc(100% - 250px);
+}
+
+#layout-menu {
+    z-index: 2;
+    position: fixed;
+    height: 100vh;
+    overflow-y: auto;
+    width: 150px;
+    left: 0;
+    top: 0;
+}
+
+/* Adjust for mobile view */
+@media screen and (max-width: 1199.98px) {
+    .layout-navbar {
+        margin-left: 0;
+        width: 100%;
+    }
+    
+    .layout-page {
+        margin-left: 0;
+        width: 100%;
+    }
+
+    #layout-menu {
+        display: none;  /* Hide sidebar on mobile by default */
+    }
+
+    .layout-menu-expanded #layout-menu {
+        display: block;  /* Show sidebar when menu is expanded */
+    }
+}
+
+/* Ensure content flows correctly */
+.content-wrapper {
+    margin-top: 1rem;
+    padding: 0 1.5rem;
+}
+
+/* Improve chart container spacing */
+.container.mt-5 {
+    margin-top: 2rem !important;
+    padding: 0 15px;
+}
+
+/* Ensure navbar container aligns properly */
+.navbar-nav-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    padding-right: 1rem;
+}
+
+/* Fix for menu toggle button */
+.layout-menu-toggle {
+    background: transparent;
+    border: none;
+}
+
+/* Ensure proper spacing in navbar */
+.navbar-nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* Fix dropdown alignment */
+.dropdown-menu-end {
+    right: 0;
+    left: auto;
+}

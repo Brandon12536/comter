@@ -1,0 +1,2005 @@
+<?php
+
+session_start();
+require '../config/connection.php';
+
+require '../phpmailer/src/Exception.php';
+require '../phpmailer/src/PHPMailer.php';
+require '../phpmailer/src/SMTP.php';
+
+
+if (!isset($_SESSION['id_administrador'])) {
+    echo 'La sesión no tiene el id_administrador.';
+    exit();
+}
+
+
+$id_administrador = $_SESSION['id_administrador'];
+
+
+$db = new Database();
+$con = $db->conectar();
+$con->exec("SET NAMES 'utf8'");
+
+$sql = "SELECT nombre, apellido, compania, business_unit, telefono, correo, role, fecha_registro
+        FROM administrador 
+        WHERE id_administrador = :id_administrador";
+$stmt = $con->prepare($sql);
+$stmt->bindParam(':id_administrador', $id_administrador, PDO::PARAM_INT);
+$stmt->execute();
+
+
+if ($stmt->rowCount() > 0) {
+
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+
+    $nombre = $row['nombre'];
+    $apellido = $row['apellido'];
+    $compania = $row['compania'];
+    $business_unit = $row['business_unit'];
+    $telefono = $row['telefono'];
+    $correo = $row['correo'];
+    $role = $row['role'];
+    $created_at = $row['fecha_registro'];
+
+
+    $photo = '../assets/img/avatars/1.png';
+
+} else {
+    echo 'Proveedor no encontrado o cuenta no válida.';
+    exit();
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    try {
+
+        $campos_requeridos = [
+            'compania' => 'Compañía',
+            'business_unit' => 'Business Unit',
+            'nombre' => 'Nombre',
+            'apellido' => 'Apellido',
+            'correo' => 'Correo',
+            'telefono' => 'Teléfono',
+            'turno_completo' => 'Turno',
+            'hora_inicio' => 'Hora de inicio',
+            'hora_fin' => 'Hora de fin',
+            'departamento' => 'Departamento',
+            'puesto' => 'Puesto'
+        ];
+
+        $campos_vacios = [];
+        foreach ($campos_requeridos as $campo => $nombre) {
+            if (empty($_POST[$campo])) {
+                $campos_vacios[] = $nombre;
+            }
+        }
+
+        if (!empty($campos_vacios)) {
+            $_SESSION['mensaje'] = "Los siguientes campos son obligatorios: " . implode(", ", $campos_vacios);
+            $_SESSION['tipo_mensaje'] = "error";
+            header('Location: ' . $_SERVER['PHP_SELF']);
+            exit();
+        }
+
+
+        if (!filter_var($_POST['correo'], FILTER_VALIDATE_EMAIL)) {
+            $_SESSION['mensaje'] = "El formato del correo electrónico no es válido";
+            $_SESSION['tipo_mensaje'] = "error";
+            header('Location: ' . $_SERVER['PHP_SELF']);
+            exit();
+        }
+
+
+        if (strlen($_POST['telefono']) < 10) {
+            $_SESSION['mensaje'] = "El número de teléfono debe tener al menos 10 dígitos";
+            $_SESSION['tipo_mensaje'] = "error";
+            header('Location: ' . $_SERVER['PHP_SELF']);
+            exit();
+        }
+
+
+        $sqlCheckEmail = "SELECT COUNT(*) FROM proveedores WHERE correo = :correo";
+        $stmtCheckEmail = $con->prepare($sqlCheckEmail);
+        $stmtCheckEmail->bindParam(':correo', $_POST['correo'], PDO::PARAM_STR);
+        $stmtCheckEmail->execute();
+
+        if ($stmtCheckEmail->fetchColumn() > 0) {
+            $_SESSION['mensaje'] = "El correo electrónico ya está registrado";
+            $_SESSION['tipo_mensaje'] = "error";
+            header('Location: ' . $_SERVER['PHP_SELF']);
+            exit();
+        }
+
+
+        $sqlTurno = "INSERT INTO turnos (nombre_turno, hora_inicio, hora_fin) 
+                     VALUES (:nombre_turno, :hora_inicio, :hora_fin)";
+
+        $stmtTurno = $con->prepare($sqlTurno);
+        $stmtTurno->bindParam(':nombre_turno', $_POST['turno_completo'], PDO::PARAM_STR);
+        $stmtTurno->bindParam(':hora_inicio', $_POST['hora_inicio'], PDO::PARAM_STR);
+        $stmtTurno->bindParam(':hora_fin', $_POST['hora_fin'], PDO::PARAM_STR);
+        $stmtTurno->execute();
+
+        $id_turno = $con->lastInsertId();
+
+
+        $codigo_verificacion = sprintf("%04d", rand(0, 9999));
+        $password_sin_cifrar = $_POST['password'];
+        $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
+
+
+        $sql = "INSERT INTO proveedores (
+            compania, 
+            business_unit, 
+            nombre, 
+            apellido, 
+            correo, 
+            telefono, 
+            codigo_verificacion,
+            role,
+            departamento,
+            puesto,
+            id_turno,
+            verificado,
+            password
+        ) VALUES (
+            :compania,
+            :business_unit,
+            :nombre,
+            :apellido,
+            :correo,
+            :telefono,
+            :codigo_verificacion,
+            'Proveedor',
+            :departamento,
+            :puesto,
+            :id_turno,
+            1,
+            :password
+        )";
+
+
+        $stmt = $con->prepare($sql);
+
+
+        $stmt->bindParam(':compania', $_POST['compania'], PDO::PARAM_STR);
+        $stmt->bindParam(':business_unit', $_POST['business_unit'], PDO::PARAM_STR);
+        $stmt->bindParam(':nombre', $_POST['nombre'], PDO::PARAM_STR);
+        $stmt->bindParam(':apellido', $_POST['apellido'], PDO::PARAM_STR);
+        $stmt->bindParam(':correo', $_POST['correo'], PDO::PARAM_STR);
+        $stmt->bindParam(':telefono', $_POST['telefono'], PDO::PARAM_STR);
+        $stmt->bindParam(':codigo_verificacion', $codigo_verificacion, PDO::PARAM_STR);
+        $stmt->bindParam(':departamento', $_POST['departamento'], PDO::PARAM_STR);
+        $stmt->bindParam(':puesto', $_POST['puesto'], PDO::PARAM_STR);
+        $stmt->bindParam(':id_turno', $id_turno, PDO::PARAM_INT);
+        $stmt->bindParam(':password', $password, PDO::PARAM_STR);
+
+
+        if ($stmt->execute()) {
+            $id_proveedor = $con->lastInsertId();
+
+            $mail = new PHPMailer\PHPMailer\PHPMailer();
+            $mail->isSMTP();
+            $mail->SMTPAuth = true;
+            $mail->SMTPSecure = 'tls';
+            $mail->Host = 'smtp.gmail.com';
+            $mail->Port = 587;
+            $mail->Username = 'bp754509@gmail.com';
+            $mail->Password = 'qkse ycth akvp iqpa';
+
+            $mail->setFrom('bp754509@gmail.com', 'COMTER');
+            $mail->addAddress($_POST['correo']);
+            $mail->Subject = 'Credenciales de Acceso - COMTER';
+            $mail->isHTML(true);
+            $mail->CharSet = 'UTF-8';
+            $mail->AddEmbeddedImage('../ico/comter.png', 'logo_comter');
+
+            $mail->Body = "
+    <html>
+    <head>
+        <style>
+            body {
+                background-color: #1b419b;
+                margin: 0;
+                padding: 0;
+                height: 100%;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                text-align: center;
+                color: white !important;
+                font-family: Arial, sans-serif;
+            }
+            .contenido {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                color: white !important; 
+                max-width: 600px; 
+            }
+            .credenciales {
+                margin-top: 30px;
+                background-color: rgba(255, 255, 255, 0.1);
+                padding: 20px;
+                border-radius: 10px;
+            }
+            .credenciales h2, 
+            .credenciales p, 
+            .credenciales strong,
+            .credenciales span {
+                color: white !important;
+            }
+            .imagen-container {
+                margin-bottom: 20px;
+            }
+            img {
+                width: 120px; 
+                height: 120px; 
+                object-fit: contain; 
+            }
+            * {
+                color: white !important;
+            }
+            a {
+                color: white !important;
+                text-decoration: none !important;
+            }
+        </style>
+    </head>
+    <body style='background-color: #1b419b; margin: 0; padding: 0; height: 100%; color: white !important;'>
+        <div class='contenido'>
+            <div class='imagen-container'>
+                <img src='cid:logo_comter' alt='Comter Logo'>
+            </div>
+            <div class='credenciales'>
+                <h2 style='color: white !important;'>¡Bienvenido a COMTER!</h2>
+                <p style='color: white !important;'>Se ha creado una cuenta para ti con las siguientes credenciales:</p>
+                <p style='color: white !important;'>
+                    <strong style='color: white !important;'>Correo electrónico:</strong> 
+                    <span style='color: white !important;'>{$_POST['correo']}</span>
+                </p>
+                <p style='color: white !important;'>
+                    <strong style='color: white !important;'>Contraseña:</strong> 
+                    <span style='color: white !important;'>{$password_sin_cifrar}</span>
+                </p>
+            </div>
+            <p style='margin-top: 20px; color: white !important;'>Por favor, guarda esta información en un lugar seguro.</p>
+        </div>
+    </body>
+    </html>";
+
+            $mail->IsHTML(true);
+            $mail->AltBody = "
+¡Bienvenido a COMTER!
+Se ha creado una cuenta para ti con las siguientes credenciales:
+Correo electrónico: {$_POST['correo']}
+Contraseña: {$password_sin_cifrar}
+Por favor, guarda esta información en un lugar seguro.";
+
+            if (!$mail->send()) {
+                $_SESSION['mensaje'] = "Usuario creado pero hubo un error al enviar el correo: " . $mail->ErrorInfo;
+                $_SESSION['tipo_mensaje'] = "warning";
+            } else {
+                $_SESSION['mensaje'] = "El registro se ha guardado exitosamente y se han enviado las credenciales por correo.";
+                $_SESSION['tipo_mensaje'] = "success";
+            }
+
+            $sqlPermisos = "INSERT INTO roles_permisos (
+                id_proveedor,
+                permiso_ver,
+                permiso_editar,
+                permiso_capturar,
+                asignado_por
+            ) VALUES (
+                :id_proveedor,
+                :permiso_ver,
+                :permiso_editar,
+                :permiso_capturar,
+                :asignado_por
+            )";
+
+            $stmtPermisos = $con->prepare($sqlPermisos);
+
+
+            $permiso_ver = isset($_POST['permiso_ver']) ? 1 : 0;
+            $permiso_editar = isset($_POST['permiso_editar']) ? 1 : 0;
+            $permiso_capturar = isset($_POST['permiso_capturar']) ? 1 : 0;
+
+
+            $stmtPermisos->bindParam(':id_proveedor', $id_proveedor, PDO::PARAM_INT);
+            $stmtPermisos->bindParam(':permiso_ver', $permiso_ver, PDO::PARAM_BOOL);
+            $stmtPermisos->bindParam(':permiso_editar', $permiso_editar, PDO::PARAM_BOOL);
+            $stmtPermisos->bindParam(':permiso_capturar', $permiso_capturar, PDO::PARAM_BOOL);
+            $stmtPermisos->bindParam(':asignado_por', $_SESSION['id_administrador'], PDO::PARAM_INT);
+
+            if ($stmtPermisos->execute()) {
+                $_SESSION['mensaje'] = "El registro y los permisos se han guardado exitosamente";
+                $_SESSION['tipo_mensaje'] = "success";
+            } else {
+                $_SESSION['mensaje'] = "Error al guardar los permisos";
+                $_SESSION['tipo_mensaje'] = "error";
+
+                $sqlDeleteProveedor = "DELETE FROM proveedores WHERE id_proveedor = :id_proveedor";
+                $stmtDeleteProveedor = $con->prepare($sqlDeleteProveedor);
+                $stmtDeleteProveedor->bindParam(':id_proveedor', $id_proveedor, PDO::PARAM_INT);
+                $stmtDeleteProveedor->execute();
+            }
+        } else {
+            $_SESSION['mensaje'] = "Error al guardar el registro";
+            $_SESSION['tipo_mensaje'] = "error";
+        }
+
+    } catch (PDOException $e) {
+        $_SESSION['mensaje'] = "Error en la base de datos: " . $e->getMessage();
+        $_SESSION['tipo_mensaje'] = "error";
+
+
+        if (isset($id_turno)) {
+            try {
+                $sqlDeleteTurno = "DELETE FROM turnos WHERE id_turno = :id_turno";
+                $stmtDeleteTurno = $con->prepare($sqlDeleteTurno);
+                $stmtDeleteTurno->bindParam(':id_turno', $id_turno, PDO::PARAM_INT);
+                $stmtDeleteTurno->execute();
+            } catch (PDOException $e2) {
+                error_log("Error al eliminar turno: " . $e2->getMessage());
+            }
+        }
+    }
+
+
+    header('Location: ' . $_SERVER['PHP_SELF']);
+    exit();
+}
+
+
+?>
+
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="shortcut icon" href="../ico/comter.png" type="image/x-icon">
+    <link rel="stylesheet" href="../css/elegant-icons.css" type="text/css">
+    <link rel="stylesheet" href="../css/owl.carousel.min.css" type="text/css">
+    <link rel="stylesheet" href="../css/magnific-popup.css" type="text/css">
+    <link rel="stylesheet" href="../css/slicknav.min.css" type="text/css">
+    <link rel="stylesheet" href="../css/styles_administrador.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="css/table_admin.css">
+    <title>Comter</title>
+
+</head>
+
+<body>
+
+
+
+    <header class="header fixed-top" style="background-color:#1B419B;">
+        <div class="container">
+            <div class="row">
+                <div class="col-lg-2">
+                    <div class="header__logo d-flex align-items-center">
+                        <a href="administrador.php"><img src="../ico/comter.png" alt="" style="width:50px"></a>
+                        <button class="navbar-toggler d-lg-none ms-auto" type="button" data-bs-toggle="collapse"
+                            data-bs-target="#sidebarMenu">
+                            <i class="fas fa-bars text-white"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="col-lg-10">
+                    <div class="header__nav__option">
+                        <nav class="header__nav__menu mobile-menu">
+                            <ul>
+                                <!--<li class="active"><a href="administrador.php">Home</a></li>-->
+                                <!--<li>
+                                    <select class="form-select transparent-select"
+                                        onchange="window.location.href=this.value">
+                                        <option value="#" selected disabled>Seleccione una opción</option>
+                                        <option value="cliente_panel.php">PCBA</option>
+                                        <option value="materiales.php">Materiales Acumulados o de Almacén</option>
+                                        <option value="sem42.php">MOLEX SEM42</option>
+                                        <option value="sem43.php">MOLEX SEM43</option>
+                                        <option value="sem44.php">MOLEX SEM44</option>
+                                        <option value="sem45.php">MOLEX SEM45</option>
+                                        <option value="sem46.php">MOLEX SEM46</option>
+                                        <option value="sem47.php">MOLEX SEM47</option>
+                                        <option value="sem48.php">MOLEX SEM48</option>
+                                        <option value="sem49.php">MOLEX SEM49</option>
+                                        <option value="sem50.php">MOLEX SEM50</option>
+                                        <option value="sem51.php">MOLEX SEM51</option>
+                                        <option value="sem52.php">MOLEX SEM52</option>
+                                    </select>
+                                </li>-->
+                                <small class="text-muted" style="text-transform:uppercase;"><span
+                                        style="color: #fff; font-weight: bold;">Bienvenido</span>
+                                    <span
+                                        style="color: #fff; font-weight: bold;"><?php echo $role; ?></span></small>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                                <li>
+
+
+
+                                    <a href="#" class="no-decoration">
+                                        <div class="d-flex align-items-center">
+                                            <img src="<?php echo $photo; ?>" alt="" class="user-image" />
+                                            <span
+                                                class="fw-semibold d-block ms-2 no-decoration"><?php echo $nombre . ' ' . $apellido; ?></span>
+                                        </div>
+                                    </a>
+                                    <ul class="dropdown">
+
+                                        <li> <a href="#" class="no-decoration"> <small class="text-muted">Rol:
+                                                    <?php echo $role; ?></small></a>
+                                            <hr>
+
+                                        <li><a href="#" class="no-decoration" onclick="confirmLogout()">Cerrar
+                                                sesión</a></li>
+                                    </ul>
+                                </li>
+
+                            </ul>
+                        </nav>
+                    </div>
+                </div>
+            </div>
+            <div id="mobile-menu-wrap"></div>
+        </div>
+    </header>
+    <br><br>
+
+    <div class="container-fluid">
+        <div class="row">
+
+            <div class="col-lg-2 sidebar collapse d-lg-block" id="sidebarMenu">
+                <div class="d-flex justify-content-between align-items-center px-3 mb-3">
+                    <div class="d-lg-none text-center pt-3">
+                        <a href="administrador.php">
+                            <img src="../ico/comter.png" alt="Comter" style="width:50px; z-index: 1031;"
+                                class="img-fluid">
+                        </a>
+                    </div>
+                    <button id="toggleSidebar" class="btn d-none d-lg-block">
+                        <i class="fas fa-bars text-white"></i>
+                    </button>
+                </div>
+                <div class="sidebar-menu">
+                    <ul class="nav flex-column">
+                    <li class="nav-item mt-1">
+                        <button type="button" class="btn btn-primary nav-link" data-bs-toggle="modal" 
+                                data-bs-target="#nuevoModal">
+                                <i class="fas fa-plus"></i> Registro Comter
+                            </button>
+                        </li>
+                        <li class="nav-item mt-1">
+                                    <button type="button" class="btn btn-primary nav-link" data-bs-toggle="modal" 
+                                            data-bs-target="#modalCliente">
+                                            <i class="fas fa-plus"></i> Registro Cliente
+                                        </button>
+                                    </li>
+                                    <li class="nav-item">
+                            <a class="nav-link" href="frontend/molex.php">
+                            <i class="fas fa-file-alt"></i>
+                            Reportes
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="frontend/graficas.php">
+                            <i class="fas fa-chart-bar"></i> Gráficas
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="frontend/respaldos.php">
+                                <i class="fas fa-database"></i> Respaldos
+                            </a>
+                        </li>
+                       
+                      
+
+                       
+<li class="nav-item mt-1">
+    <button class="btn btn-success" onclick="mostrarSweetAlert()">
+        <i class="fas fa-file-excel"></i> Exportar a Excel
+    </button>
+</li>
+
+<!--<li class="nav-item mt-1">
+                            <a class="nav-link" href="frontend/clientes.php">
+                                <i class="fas fa-users"></i> Clientes
+                            </a>
+                        </li>-->
+                        
+                    </ul>
+                </div>
+            </div>
+
+
+            <div class="col-lg-10 main-content">
+                <div class="container-fluid px-4">
+                    <div class="row">
+                        <div class="col-12 text-center mb-4">
+                         
+                        </div>
+
+                        <?php
+
+                        $sqlCount = "SELECT COUNT(*) FROM proveedores";
+                        $stmtCount = $con->prepare($sqlCount);
+                        $stmtCount->execute();
+                        $rowCount = $stmtCount->fetchColumn();
+                        ?>
+
+                        <div class="col-12 mb-4 d-flex justify-content-between">
+                           <!-- <button type="button" class="btn btn-primary" data-bs-toggle="modal"
+                                data-bs-target="#nuevoModal">
+                                <i class="fas fa-plus"></i> Nuevo Registro
+                            </button>-->
+
+                            <?php if ($rowCount > 0): ?>
+                               <!-- <a href="backend/exportar_excel.php" class="btn btn-success">
+                                    <i class="fas fa-file-excel"></i> Exportar a Excel
+                                </a>-->
+                            <?php else: ?>
+                                <!--<button class="btn btn-success" disabled title="No hay datos para exportar">
+                                    <i class="fas fa-file-excel"></i> Exportar a Excel
+                                </button>-->
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="modal fade" id="nuevoModal" tabindex="-1" aria-labelledby="nuevoModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content" style="background: linear-gradient(to right, #f8f9fa, #e9ecef);">
+            <div class="modal-header" style="background-color: #0d6efd; color: white;">
+                <h5 class="modal-title" id="nuevoModalLabel">Registro Comter</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" style="background-color: rgba(255, 255, 255, 0.9);">
+                <form id="formNuevoRegistro" method="POST" action="administrador.php">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Compañía</label>
+                            <input type="text" class="form-control" name="compania">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Business Unit</label>
+                            <input type="text" class="form-control" name="business_unit">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Nombre</label>
+                            <input type="text" class="form-control" name="nombre">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Apellido</label>
+                            <input type="text" class="form-control" name="apellido">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Correo Electrónico</label>
+                            <input type="email" class="form-control" name="correo">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Teléfono</label>
+                            <input type="tel" class="form-control" name="telefono">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Departamento</label>
+                            <select class="form-select" name="departamento">
+                                <option value="">Seleccione un departamento</option>
+                                <option value="ADMINISTRACION">ADMINISTRACION</option>
+                                <option value="PRODUCCION">PRODUCCION</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Puesto</label>
+                            <select class="form-select" name="puesto">
+                                <option value="">Seleccione un puesto</option>
+                                <option value="GERENTE GENERAL">GERENTE GENERAL</option>
+                                <option value="SUPERVISOR">SUPERVISOR</option>
+                                <option value="PRODUCCION">PRODUCCION</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Turno</label>
+                            <select class="form-select" name="turno_completo">
+                                <option value="">Seleccione un turno</option>
+                                <option value="1er.">1er.</option>
+                                <option value="2do.">2do.</option>
+                                <option value="3er.">3er.</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Contraseña</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" name="password" id="password">
+                                <span class="input-group-text" id="togglePassword">
+                                    <i class="fas fa-eye" id="eyeIcon"></i>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <button type="button" class="btn btn-primary" onclick="sugerirContraseña()">
+                                <i class="fas fa-key"></i> Sugerir Contraseña
+                            </button>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Hora de Inicio</label>
+                            <input type="time" class="form-control" name="hora_inicio">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Hora de Fin</label>
+                            <input type="time" class="form-control" name="hora_fin">
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-12">
+                                <h4>Permisos</h4>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="permiso_ver" id="permiso_ver">
+                                    <label class="form-check-label" for="permiso_ver">Permiso para ver</label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="permiso_editar" id="permiso_editar">
+                                    <label class="form-check-label" for="permiso_editar">Permiso para editar</label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="permiso_capturar" id="permiso_capturar">
+                                    <label class="form-check-label" for="permiso_capturar">Permiso para capturar</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="cerrarModalNuevo()">Cancelar</button>
+                        <button type="submit" class="btn btn-primary" id="guardarBtn" >Guardar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editarModal" tabindex="-1" aria-labelledby="editarModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editarModalLabel">Editar Proveedor</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formEditar" method="POST">
+                    <input type="hidden" id="edit_id_proveedor" name="id_proveedor">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="edit_compania" class="form-label">Compañía</label>
+                            <input type="text" class="form-control" id="edit_compania" name="compania" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit_business_unit" class="form-label">Business Unit</label>
+                            <input type="text" class="form-control" id="edit_business_unit" name="business_unit" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit_nombre" class="form-label">Nombre</label>
+                            <input type="text" class="form-control" id="edit_nombre" name="nombre" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit_apellido" class="form-label">Apellido</label>
+                            <input type="text" class="form-control" id="edit_apellido" name="apellido" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit_correo" class="form-label">Correo</label>
+                            <input type="email" class="form-control" id="edit_correo" name="correo" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit_telefono" class="form-label">Teléfono</label>
+                            <input type="tel" class="form-control" id="edit_telefono" name="telefono" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit_departamento" class="form-label">Departamento</label>
+                            <select class="form-select" id="edit_departamento" name="departamento" required>
+                                <option value="">Seleccione...</option>
+                                <option value="ADMINISTRACION">ADMINISTRACION</option>
+                                <option value="PRODUCCION">PRODUCCION</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit_puesto" class="form-label">Puesto</label>
+                            <select class="form-select" id="edit_puesto" name="puesto" required>
+                                <option value="">Seleccione...</option>
+                                <option value="GERENTE GENERAL">GERENTE GENERAL</option>
+                                <option value="SUPERVISOR">SUPERVISOR</option>
+                                <option value="PRODUCCION">PRODUCCION</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="edit_turno_completo" class="form-label">Turno</label>
+                            <select class="form-select" id="edit_turno_completo" name="turno_completo" required>
+                                <option value="">Seleccione...</option>
+                                <?php
+                                $turnos = [
+                                    '1er.' => '1er. Turno',
+                                    '2do.' => '2do. Turno',
+                                    '3er.' => '3er. Turno'
+                                ];
+                                foreach ($turnos as $valor => $texto) {
+                                    echo '<option value="' . $valor . '">' . $texto . '</option>';
+                                }
+                                ?>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="edit_hora_inicio" class="form-label">Hora de Inicio</label>
+                            <input type="time" class="form-control" id="edit_hora_inicio" name="hora_inicio" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="edit_hora_fin" class="form-label">Hora de Fin</label>
+                            <input type="time" class="form-control" id="edit_hora_fin" name="hora_fin" required>
+                        </div>
+                        <div class="col-12 mt-4">
+                            <h4>Permisos</h4>
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="edit_permiso_ver" name="permiso_ver">
+                                        <label class="form-check-label" for="edit_permiso_ver">Permiso para ver</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="edit_permiso_editar" name="permiso_editar">
+                                        <label class="form-check-label" for="edit_permiso_editar">Permiso para editar</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="edit_permiso_capturar" name="permiso_capturar">
+                                        <label class="form-check-label" for="edit_permiso_capturar">Permiso para capturar</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="cerrarModalEditar()">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+
+    const editarModal = document.getElementById('editarModal');
+    editarModal.addEventListener('hidden.bs.modal', function () {
+        location.reload();
+    });
+</script>
+                        <?php
+
+                        $sql = "
+    (SELECT 
+        p.id_proveedor as id,
+        p.compania,
+        p.business_unit,
+        p.nombre,
+        p.apellido,
+        p.correo,
+        p.telefono,
+        p.created_at AS fecha_alta,
+        p.departamento,
+        p.puesto,
+        t.turno_completo,
+        'Proveedor' as tipo
+    FROM 
+        proveedores p
+    LEFT JOIN 
+        turnos t ON p.id_turno = t.id_turno)
+    UNION ALL
+    (SELECT 
+        u.id_usuarios as id,
+        u.compania,
+        u.business_unit,
+        u.nombre,
+        u.apellido,
+        u.correo,
+        u.telefono,
+        u.created_at AS fecha_alta,
+        'N/A' as departamento,
+        'N/A' as puesto,
+        'N/A' as turno_completo,
+        u.role as tipo
+    FROM 
+        usuarios u)
+    ORDER BY nombre ASC, apellido ASC";
+                        
+                        $stmt = $con->prepare($sql);
+                        $stmt->execute();
+                        ?>
+
+
+
+<div class="col-12">
+    <?php if (isset($_SESSION['mensaje']) && isset($_SESSION['tipo_mensaje'])): ?>
+        <div class="alert alert-<?php echo $_SESSION['tipo_mensaje'] === 'success' ? 'success' : 'danger'; ?> alert-dismissible fade show mt-3" role="alert">
+            <strong><?php echo $_SESSION['tipo_mensaje'] === 'success' ? '¡Éxito!' : 'Error:'; ?></strong>
+            <?php echo $_SESSION['mensaje']; ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        <?php
+        unset($_SESSION['mensaje']);
+        unset($_SESSION['tipo_mensaje']);
+    endif;
+    ?>
+    <div class="table-responsive">
+        <table class="table table-bordered table-hover">
+            <thead class="table-primary" style="position: sticky; top: 0; z-index: 10;">
+                <tr>
+                    <th style="background-color:#79f873;">NO.</th>
+                    <th style="background-color:#79f873;">
+                        TIPO
+                        <select class="form-select form-select-sm mt-1" id="tipoFilter" onchange="filterTable()">
+                            <option value="">Todos</option>
+                            <option value="proveedor">Comter</option>
+                            <option value="cliente">Cliente</option>
+                        </select>
+                    </th>
+                    <th style="background-color:#79f873;">
+                        COMPAÑÍA
+                        <select class="form-select form-select-sm mt-1" id="companiaFilter" onchange="filterTable()">
+                            <option value="">Todos</option>
+                            <?php
+                            $stmt2 = $con->query("SELECT DISTINCT compania FROM (SELECT compania FROM proveedores UNION SELECT compania FROM usuarios) as comp ORDER BY compania");
+                            while ($row = $stmt2->fetch()) {
+                                echo '<option value="' . htmlspecialchars($row['compania']) . '">' . htmlspecialchars($row['compania']) . '</option>';
+                            }
+                            ?>
+                        </select>
+                    </th>
+                    <th>
+                        BUSINESS UNIT
+                        <select class="form-select form-select-sm mt-1" id="businessUnitFilter" onchange="filterTable()">
+                            <option value="">Todos</option>
+                            <?php
+                            $stmt3 = $con->query("SELECT DISTINCT business_unit FROM (SELECT business_unit FROM proveedores UNION SELECT business_unit FROM usuarios) as bu ORDER BY business_unit");
+                            while ($row = $stmt3->fetch()) {
+                                echo '<option value="' . htmlspecialchars($row['business_unit']) . '">' . htmlspecialchars($row['business_unit']) . '</option>';
+                            }
+                            ?>
+                        </select>
+                    </th>
+                    <th>
+                        NOMBRE COMPLETO
+                        <select class="form-select form-select-sm mt-1" id="nombreFilter" onchange="filterTable()">
+                            <option value="">Todos</option>
+                            <optgroup label="Comter">
+                            <?php
+                            $stmt4a = $con->query("SELECT DISTINCT CONCAT(nombre, ' ', apellido) as nombre_completo 
+                                                FROM proveedores 
+                                                ORDER BY nombre_completo");
+                            while ($row = $stmt4a->fetch()) {
+                                echo '<option value="' . htmlspecialchars($row['nombre_completo']) . '">' . 
+                                     htmlspecialchars($row['nombre_completo']) . '</option>';
+                            }
+                            ?>
+                            </optgroup>
+                            <optgroup label="Clientes">
+                            <?php
+                            $stmt4b = $con->query("SELECT DISTINCT CONCAT(nombre, ' ', apellido) as nombre_completo 
+                                                FROM usuarios 
+                                                WHERE role = 'Cliente'
+                                                ORDER BY nombre_completo");
+                            while ($row = $stmt4b->fetch()) {
+                                echo '<option value="' . htmlspecialchars($row['nombre_completo']) . '">' . 
+                                     htmlspecialchars($row['nombre_completo']) . '</option>';
+                            }
+                            ?>
+                            </optgroup>
+                        </select>
+                    </th>
+                    <th>CORREO ELECTRONICO
+                        <select class="form-select form-select-sm mt-1" id="correoFilter" onchange="filterTable()">
+                            <option value="">Todos</option>
+                            <?php
+                            $stmt5 = $con->query("SELECT DISTINCT correo FROM (SELECT correo FROM proveedores UNION SELECT correo FROM usuarios) as correos ORDER BY correo");
+                            while ($row = $stmt5->fetch()) {
+                                echo '<option value="' . htmlspecialchars($row['correo']) . '">' . htmlspecialchars($row['correo']) . '</option>';
+                            }
+                            ?>
+                        </select>
+                    </th>
+                    <th style="background-color:#cfcfcf;">TELEFONO PROPIO O DE CONTACTO
+                        <select class="form-select form-select-sm mt-1" id="telefonoFilter" onchange="filterTable()">
+                            <option value="">Todos</option>
+                            <?php
+                            $stmt6 = $con->query("SELECT DISTINCT telefono FROM (SELECT telefono FROM proveedores UNION SELECT telefono FROM usuarios) as telefonos ORDER BY telefono");
+                            while ($row = $stmt6->fetch()) {
+                                echo '<option value="' . htmlspecialchars($row['telefono']) . '">' . htmlspecialchars($row['telefono']) . '</option>';
+                            }
+                            ?>
+                        </select>
+                    </th>
+                    <th style="background-color:#79f873;">FECHA ALTA
+                        <select class="form-select form-select-sm mt-1" id="fechaFilter" onchange="filterTable()">
+                            <option value="">Todos</option>
+                            <?php
+                            setlocale(LC_TIME, 'es_ES.UTF-8', 'es_ES', 'spanish');
+                            mb_internal_encoding("UTF-8");
+                            $stmt7 = $con->query("SELECT DISTINCT DATE(created_at) as fecha FROM (SELECT created_at FROM proveedores UNION SELECT created_at FROM usuarios) as fechas ORDER BY fecha DESC");
+                            while ($row = $stmt7->fetch()) {
+                                $fecha = strtotime($row['fecha']);
+                                $fecha_formateada = strftime("%A %d %B %Y", $fecha);
+                                echo '<option value="' . $row['fecha'] . '">' . 
+                                     utf8_encode(ucwords($fecha_formateada)) . '</option>';
+                            }
+                            ?>
+                        </select>
+                    </th>
+                    <th>DEPARTAMENTO
+                        <select class="form-select form-select-sm mt-1" id="departamentoFilter" onchange="filterTable()">
+                            <option value="">Todos</option>
+                            <?php
+                            $stmt8 = $con->query("SELECT DISTINCT departamento FROM proveedores WHERE departamento IS NOT NULL ORDER BY departamento");
+                            while ($row = $stmt8->fetch()) {
+                                echo '<option value="' . htmlspecialchars($row['departamento']) . '">' . 
+                                     htmlspecialchars($row['departamento']) . '</option>';
+                            }
+                            ?>
+                        </select>
+                    </th>
+                    <th>PUESTO
+                        <select class="form-select form-select-sm mt-1" id="puestoFilter" onchange="filterTable()">
+                            <option value="">Todos</option>
+                            <?php
+                            $stmt9 = $con->query("SELECT DISTINCT puesto FROM proveedores WHERE puesto IS NOT NULL ORDER BY puesto");
+                            while ($row = $stmt9->fetch()) {
+                                echo '<option value="' . htmlspecialchars($row['puesto']) . '">' . 
+                                     htmlspecialchars($row['puesto']) . '</option>';
+                            }
+                            ?>
+                        </select>
+                    </th>
+                    <th>TURNO
+                        <select class="form-select form-select-sm mt-1" id="turnoFilter" onchange="filterTable()">
+                            <option value="">Todos</option>
+                            <?php
+                            $stmt10 = $con->query("SELECT DISTINCT t.turno_completo 
+                                                     FROM proveedores p 
+                                                     LEFT JOIN turnos t ON p.id_turno = t.id_turno 
+                                                     WHERE t.turno_completo IS NOT NULL 
+                                                     ORDER BY t.turno_completo");
+                            while ($row = $stmt10->fetch()) {
+                                echo '<option value="' . htmlspecialchars($row['turno_completo']) . '">' . 
+                                     htmlspecialchars($row['turno_completo']) . '</option>';
+                            }
+                            ?>
+                        </select>
+                    </th>
+                    <th style="background-color:#f2d7d5;">ACCIONES</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if ($stmt->rowCount() > 0): ?>
+                    <?php 
+                    $counter = 1;
+                    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)): ?>
+                        <tr>
+                            <td><?php echo $counter++; ?></td>
+                            <td data-original-tipo="<?php echo strtolower($row['tipo']); ?>">
+                                <?php echo htmlspecialchars($row['tipo'] === 'Proveedor' ? 'Comter' : $row['tipo']); ?>
+                            </td>
+                            <td><?php echo htmlspecialchars($row['compania']); ?></td>
+                            <td><?php echo htmlspecialchars($row['business_unit']); ?></td>
+                            <td><?php echo htmlspecialchars($row['nombre'] . ' ' . $row['apellido']); ?></td>
+                            <td><?php echo htmlspecialchars($row['correo']); ?></td>
+                            <td><?php echo htmlspecialchars($row['telefono']); ?></td>
+                            <td>
+                                <?php
+                                    setlocale(LC_TIME, 'es_ES.UTF-8', 'es_ES', 'spanish');
+                                    mb_internal_encoding("UTF-8");
+                                    $fecha = strtotime($row['fecha_alta']);
+                                    $fecha_formateada = strftime("%A %d %B %Y", $fecha);
+                                    echo '<span data-fecha="' . date('Y-m-d', $fecha) . '">' . 
+                                         utf8_encode(ucwords($fecha_formateada)) . '</span>';
+                                ?>
+                            </td>
+                            <td><?php echo htmlspecialchars($row['departamento']); ?></td>
+                            <td><?php echo htmlspecialchars($row['puesto']); ?></td>
+                            <td><?php echo htmlspecialchars($row['turno_completo']); ?></td>
+                            <td>
+                                <?php if ($row['tipo'] === 'Proveedor'): ?>
+                                    <button type="button" class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#editarModal" onclick="cargarDatos(<?php echo $row['id']; ?>)">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <a href="javascript:void(0)" class="btn btn-danger btn-sm" onclick="confirmarEliminacion(<?php echo $row['id']; ?>)">
+                                        <i class="fas fa-trash-alt"></i>
+                                    </a>
+                                <?php else: ?>
+                                    <button type="button" class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#editarModalCliente" onclick="cargarDatosCliente(<?php echo $row['id']; ?>)">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <a href="javascript:void(0)" class="btn btn-danger btn-sm" onclick="confirmarEliminacionCliente(<?php echo $row['id']; ?>)">
+                                        <i class="fas fa-trash-alt"></i>
+                                    </a>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endwhile; ?>
+                <?php else: ?>
+                    <tr>
+                        <td colspan="13" class="text-center">No hay información para mostrar</td>
+                    </tr>
+                <?php endif; ?>
+                <tr id="noResultsRow" class="hidden-row">
+                    <td colspan="13" class="text-center">
+                        <div class="alert alert-info mb-0" role="alert">
+                            <i class="fas fa-info-circle me-2"></i>
+                            No se encontraron registros con los filtros aplicados
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function filterTable() {
+    const tipo = document.getElementById('tipoFilter').value.toLowerCase();
+    const compania = document.getElementById('companiaFilter').value.toLowerCase();
+    const businessUnit = document.getElementById('businessUnitFilter').value.toLowerCase();
+    const nombre = document.getElementById('nombreFilter').value.toLowerCase();
+    const correo = document.getElementById('correoFilter').value.toLowerCase();
+    const telefono = document.getElementById('telefonoFilter').value.toLowerCase();
+    const fecha = document.getElementById('fechaFilter').value;
+    const departamento = document.getElementById('departamentoFilter').value.toLowerCase();
+    const puesto = document.getElementById('puestoFilter').value.toLowerCase();
+    const turno = document.getElementById('turnoFilter').value.toLowerCase();
+    
+    const tbody = document.querySelector('tbody');
+    const rows = tbody.getElementsByTagName('tr');
+    const noResultsRow = document.getElementById('noResultsRow');
+    
+    let counter = 1;
+    let visibleRows = 0;
+    
+    // First, hide the no results message
+    noResultsRow.classList.add('hidden-row');
+    
+    // Filter rows
+    for (let row of rows) {
+        if (row === noResultsRow) continue; // Skip the no results row
+        
+        const cells = row.getElementsByTagName('td');
+        if (cells.length === 0) continue;
+        
+        const originalTipo = cells[1].getAttribute('data-original-tipo') || cells[1].textContent.toLowerCase();
+        const rowCompania = cells[2].textContent.toLowerCase();
+        const rowBusinessUnit = cells[3].textContent.toLowerCase();
+        const rowNombre = cells[4].textContent.toLowerCase();
+        const rowCorreo = cells[5].textContent.toLowerCase();
+        const rowTelefono = cells[6].textContent.toLowerCase();
+        const rowFecha = cells[7].querySelector('span').getAttribute('data-fecha');
+        const rowDepartamento = cells[8].textContent.toLowerCase();
+        const rowPuesto = cells[9].textContent.toLowerCase();
+        const rowTurno = cells[10].textContent.toLowerCase();
+        
+        const tipoMatch = !tipo || originalTipo.includes(tipo);
+        const companiaMatch = !compania || rowCompania.includes(compania);
+        const businessUnitMatch = !businessUnit || rowBusinessUnit.includes(businessUnit);
+        const nombreMatch = !nombre || rowNombre.includes(nombre);
+        const correoMatch = !correo || rowCorreo.includes(correo);
+        const telefonoMatch = !telefono || rowTelefono.includes(telefono);
+        const fechaMatch = !fecha || rowFecha === fecha;
+        const departamentoMatch = !departamento || rowDepartamento.includes(departamento);
+        const puestoMatch = !puesto || rowPuesto.includes(puesto);
+        const turnoMatch = !turno || rowTurno.includes(turno);
+        
+        const shouldShow = tipoMatch && companiaMatch && businessUnitMatch && nombreMatch && 
+                         correoMatch && telefonoMatch && fechaMatch && departamentoMatch && 
+                         puestoMatch && turnoMatch;
+        
+        // Apply transition classes
+        if (shouldShow) {
+            row.classList.remove('hidden-row');
+            visibleRows++;
+            setTimeout(() => {
+                if (!row.classList.contains('hidden-row')) {
+                    cells[0].textContent = counter++;
+                }
+            }, 50);
+        } else {
+            row.classList.add('hidden-row');
+        }
+    }
+    
+    // Show no results message if no visible rows
+    if (visibleRows === 0 && (tipo || compania || businessUnit || nombre || correo || 
+        telefono || fecha || departamento || puesto || turno)) {
+        noResultsRow.classList.remove('hidden-row');
+    }
+}
+</script>
+</tbody>
+</table>
+                    
+
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+
+    </div>
+    </div>
+    </div>
+    </div>
+    </div>
+
+
+
+    <script>
+ 
+ function generarContraseña(longitud) {
+     const caracteres = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
+     let contraseña = '';
+     for (let i = 0; i < longitud; i++) {
+         const randomIndex = Math.floor(Math.random() * caracteres.length);
+         contraseña += caracteres.charAt(randomIndex);
+     }
+     return contraseña;
+ }
+
+
+ function sugerirContraseña() {
+     const contraseñaSugerida = generarContraseña(12);
+     document.getElementById('password').value = contraseñaSugerida;
+ }
+
+
+ const togglePasswords = document.querySelector("#togglePassword");
+ const passwordFields = document.querySelector("#password");
+ const eyeIcons = document.querySelector("#eyeIcon");
+
+ togglePassword.addEventListener("click", function () {
+     if (passwordField.type === "password") {
+         passwordField.type = "text";
+         eyeIcon.classList.remove("fa-eye");
+         eyeIcon.classList.add("fa-eye-slash");
+     } else {
+         passwordField.type = "password";
+         eyeIcon.classList.remove("fa-eye-slash");
+         eyeIcon.classList.add("fa-eye");
+     }
+ });
+</script>
+
+<div class="modal fade" id="modalCliente" tabindex="-1" aria-labelledby="nuevoModalLabelCliente" aria-hidden="true">
+ <div class="modal-dialog modal-lg">
+     <div class="modal-content">
+         <div class="modal-header" style="background-color: #28a745; color: white;">
+             <h5 class="modal-title" id="nuevoModalLabelCliente">Registro de Cliente</h5>
+             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+         </div>
+         <div class="modal-body">
+             <form id="formNuevoRegistroCliente" method="POST" action="frontend/clientes.php">
+                 <div class="row g-3">
+                     <div class="col-md-6">
+                         <label class="form-label">Compañía</label>
+                         <input type="text" class="form-control" name="compania" required>
+                     </div>
+                     
+                     <div class="col-md-6">
+                         <label class="form-label">Business Unit</label>
+                         <input type="text" class="form-control" name="business_unit" required>
+                     </div>
+                    
+                     <div class="col-md-6">
+                         <label class="form-label">Nombre</label>
+                         <input type="text" class="form-control" name="nombre" required>
+                     </div>
+                     
+                     <div class="col-md-6">
+                         <label class="form-label">Apellido</label>
+                         <input type="text" class="form-control" name="apellido" required>
+                     </div>
+                    
+                     <div class="col-md-6">
+                         <label class="form-label">Correo Electrónico</label>
+                         <input type="email" class="form-control" name="correo" required>
+                     </div>
+                    
+                     <div class="col-md-6">
+                         <label class="form-label">Teléfono</label>
+                         <input type="tel" class="form-control" name="telefono" required>
+                     </div>
+                    
+                     <div class="col-md-6">
+                         <label class="form-label">Contraseña</label>
+                         <div class="input-group">
+                             <input type="password" class="form-control" name="password" id="password_cliente" required>
+                             <span class="input-group-text" id="togglePasswordCliente">
+                                 <i class="fas fa-eye" id="eyeIconCliente"></i>
+                             </span>
+                         </div>
+                     </div>
+                 
+                     <div class="col-md-6">
+                         <button type="button" class="btn btn-primary" onclick="sugerirContraseñaCliente()">
+                             <i class="fas fa-key"></i> Sugerir Contraseña
+                         </button>
+                     </div>
+                    
+                     <div class="row mb-3">
+                         <div class="col-12">
+                             <h4>Permisos</h4>
+                         </div>
+                         <div class="col-md-4">
+                             <div class="form-check">
+                                 <input class="form-check-input" type="checkbox" name="permiso_ver" id="permiso_ver">
+                                 <label class="form-check-label" for="permiso_ver">Permiso para ver</label>
+                             </div>
+                         </div>
+                         <div class="col-md-4">
+                             <div class="form-check">
+                                 <input class="form-check-input" type="checkbox" name="permiso_editar" id="permiso_editar">
+                                 <label class="form-check-label" for="permiso_editar">Permiso para editar</label>
+                             </div>
+                         </div>
+                         <div class="col-md-4">
+                             <div class="form-check">
+                                 <input class="form-check-input" type="checkbox" name="permiso_capturar" id="permiso_capturar">
+                                 <label class="form-check-label" for="permiso_capturar">Permiso para capturar</label>
+                             </div>
+                         </div>
+                     </div>
+                 </div>
+                 <div class="modal-footer">
+                 <button type="button" class="btn btn-secondary" onclick="cerrarModalCliente()">Cancelar</button>
+                     <button type="submit" class="btn btn-primary" id="guardarBtnCliente" disabled>Guardar</button>
+                 </div>
+             </form>
+         </div>
+     </div>
+ </div>
+</div>
+<script>
+function cerrarModalCliente() {
+    location.reload();  
+
+   
+}
+</script>
+</div>
+<script>
+    const form = document.getElementById('formNuevoRegistroCliente');
+    const guardarBtn = document.getElementById('guardarBtnCliente');
+
+    function checkFormCompletion() {
+       
+        const inputs = form.querySelectorAll('input[type="text"], input[type="email"], input[type="tel"], input[type="password"], select');
+        let allFilled = true;
+
+        inputs.forEach(input => {
+           
+            if (input.value.trim() === '') {
+                allFilled = false;
+            }
+        });
+
+     
+        guardarBtn.disabled = !allFilled;
+
+        console.log('Estado del botón de guardar: ', guardarBtn.disabled);
+    }
+
+ 
+    form.addEventListener('input', checkFormCompletion);
+    form.addEventListener('change', checkFormCompletion);
+
+    
+    checkFormCompletion();
+</script>
+</div>
+
+
+    <footer class="content-footer footer" style="background-color:#edebea">
+        <div class="container-xxl d-flex flex-wrap justify-content-center py-2 flex-md-row flex-column text-center"
+            style="color:#838383;">
+            <div class="mb-2 mb-md-0 fw-bolder">
+                &copy;
+                <script>
+                    document.write(new Date().getFullYear());
+                </script>
+                , Comter |
+                <a href="#" class="footer-link fw-bolder no-decoration" style="color: #6c757d;">Osdems Digital Group</a>
+            </div>
+        </div>
+    </footer>
+
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"></script>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script>
+        function confirmLogout() {
+            Swal.fire({
+                title: '¿Estás seguro?',
+                text: '¿Quieres cerrar la sesión?',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Sí, cerrar sesión',
+                cancelButtonText: 'Cancelar'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    window.location.href = '../admin/backend/home/logout.php';
+                }
+            });
+        }
+    </script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const sidebar = document.querySelector('.sidebar');
+            const mainContent = document.querySelector('.main-content');
+            const toggleBtn = document.getElementById('toggleSidebar');
+
+
+            if (window.innerWidth >= 992) {
+                toggleBtn.addEventListener('click', function () {
+                    sidebar.classList.toggle('collapsed');
+                    mainContent.classList.toggle('expanded');
+
+
+                    const isCollapsed = sidebar.classList.contains('collapsed');
+                    localStorage.setItem('sidebarCollapsed', isCollapsed);
+                });
+
+
+                const savedState = localStorage.getItem('sidebarCollapsed');
+                if (savedState === 'true') {
+                    sidebar.classList.add('collapsed');
+                    mainContent.classList.add('expanded');
+                }
+            }
+        });
+    </script>
+    <script>
+
+        function generarContraseña(longitud) {
+            const caracteres = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
+            let contraseña = '';
+            for (let i = 0; i < longitud; i++) {
+                const randomIndex = Math.floor(Math.random() * caracteres.length);
+                contraseña += caracteres.charAt(randomIndex);
+            }
+            return contraseña;
+        }
+
+
+        function sugerirContraseña() {
+            const contraseñaSugerida = generarContraseña(12);
+            document.getElementById('password').value = contraseñaSugerida;
+        }
+
+
+        const togglePassword = document.querySelector("#togglePassword");
+        const passwordField = document.querySelector("#password");
+        const eyeIcon = document.querySelector("#eyeIcon");
+
+        togglePassword.addEventListener("click", function () {
+
+            if (passwordField.type === "password") {
+                passwordField.type = "text";
+                eyeIcon.classList.remove("fa-eye");
+                eyeIcon.classList.add("fa-eye-slash");
+            } else {
+                passwordField.type = "password";
+                eyeIcon.classList.remove("fa-eye-slash");
+                eyeIcon.classList.add("fa-eye");
+            }
+        });
+    </script>
+
+
+
+    <script>
+        function cargarDatos(id) {
+
+            Swal.fire({
+                title: 'Cargando...',
+                text: 'Por favor espere',
+                allowOutsideClick: false,
+                showConfirmButton: false,
+                willOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+
+
+            fetch(`backend/obtener_registro.php?id=${id}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Error en la respuesta del servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+
+
+                    document.getElementById('edit_id_proveedor').value = data.id_proveedor;
+                    document.getElementById('edit_compania').value = data.compania;
+                    document.getElementById('edit_business_unit').value = data.business_unit;
+                    document.getElementById('edit_nombre').value = data.nombre;
+                    document.getElementById('edit_apellido').value = data.apellido;
+                    document.getElementById('edit_correo').value = data.correo;
+                    document.getElementById('edit_telefono').value = data.telefono;
+                    document.getElementById('edit_departamento').value = data.departamento;
+                    document.getElementById('edit_puesto').value = data.puesto;
+                    document.getElementById('edit_turno_completo').value = data.nombre_turno;
+                    document.getElementById('edit_hora_inicio').value = data.hora_inicio;
+                    document.getElementById('edit_hora_fin').value = data.hora_fin;
+
+
+                    document.getElementById('edit_permiso_ver').checked = Boolean(data.permiso_ver);
+                    document.getElementById('edit_permiso_editar').checked = Boolean(data.permiso_editar);
+                    document.getElementById('edit_permiso_capturar').checked = Boolean(data.permiso_capturar);
+
+
+                    Swal.close();
+
+
+                    const modal = new bootstrap.Modal(document.getElementById('editarModal'));
+                    modal.show();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error',
+                        text: error.message || 'Error al cargar los datos. Por favor, intente nuevamente.'
+                    });
+                });
+        }
+
+
+        document.getElementById('formEditar').addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            Swal.fire({
+                title: '¿Estás seguro?',
+                text: "¿Deseas guardar los cambios?",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#3085d6',
+                cancelButtonColor: '#d33',
+                confirmButtonText: 'Sí, guardar',
+                cancelButtonText: 'Cancelar'
+            }).then((result) => {
+                if (result.isConfirmed) {
+
+                    const formData = new FormData(this);
+
+
+                    fetch('backend/actualizar_registro.php', {
+                        method: 'POST',
+                        body: formData
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.error) {
+                                throw new Error(data.error);
+                            }
+
+
+                            Swal.fire({
+                                icon: 'success',
+                                title: '¡Éxito!',
+                                text: 'Los cambios se guardaron correctamente',
+                                showConfirmButton: false,
+                                timer: 1500
+                            }).then(() => {
+
+                                window.location.reload();
+                            });
+                        })
+                        .catch(error => {
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'Error',
+                                text: error.message || 'Error al guardar los cambios'
+                            });
+                        });
+                }
+            });
+        });
+
+
+        document.getElementById('editarModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('formEditar').reset();
+        });
+    </script>
+
+    <script>
+        function cerrarModalEditar() {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('editarModal'));
+            modal.hide();
+            document.getElementById('formEditar').reset();
+        }
+
+        function cerrarModalNuevo() {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('nuevoModal'));
+            modal.hide();
+            document.getElementById('formNuevoRegistro').reset();
+        }
+
+
+        document.getElementById('editarModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('formEditar').reset();
+        });
+
+        document.getElementById('nuevoModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('formNuevoRegistro').reset();
+        });
+    </script>
+
+    <script>
+        /*function confirmarEliminacion(id) {
+
+            fetch(`backend/eliminar_registro.php?id=${id}`)
+                .then(response => response.json())
+                .then(data => {
+                    let mensaje = '';
+                    if (data.warning) {
+                        mensaje = data.message.replace(/\n/g, '<br>');
+                    } else {
+                        mensaje = 'Este usuario no tiene registros asociados en ninguna tabla.';
+                    }
+
+
+                    Swal.fire({
+                        title: '¿Estás seguro de eliminar este registro?',
+                        html: mensaje,
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonColor: '#d33',
+                        cancelButtonColor: '#3085d6',
+                        confirmButtonText: 'Sí, eliminar',
+                        cancelButtonText: 'Cancelar',
+                        customClass: {
+                            popup: 'swal-wide',
+                        }
+                    }).then((result) => {
+                        if (result.isConfirmed) {
+
+                            fetch(`backend/eliminar_registro.php?id=${id}&confirmar=1`)
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === "error") {
+            throw new Error(data.message);
+        }
+
+        Swal.fire({
+            title: '¡Eliminado!',
+            text: data.warning ?
+                'Todos los registros han sido eliminados correctamente.' :
+                'El registro ha sido eliminado correctamente.',
+            icon: 'success'
+        }).then(() => {
+            window.location.reload();
+        });
+    })
+    .catch(error => {
+        Swal.fire({
+            title: 'Error',
+            text: error.message || "Ocurrió un error inesperado.",
+            icon: 'error'
+        });
+    });
+                }
+            });
+        }*/
+    </script>
+   <script>
+function confirmarEliminacion(id_proveedor) {
+    Swal.fire({
+        title: '¿Estás seguro?',
+        text: '¿Quieres eliminar este registro?',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#3085d6',
+        confirmButtonText: 'Sí, eliminar',
+        cancelButtonText: 'Cancelar'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            fetch(`backend/eliminar_registro.php?id_proveedor=${id_proveedor}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+
+                    Swal.fire({
+                        title: '¡Eliminado!',
+                        text: 'El registro ha sido eliminado correctamente.',
+                        icon: 'success'
+                    }).then(() => {
+                       
+                        location.reload();
+                    });
+                })
+                .catch(error => {
+                    Swal.fire({
+                        title: 'Error',
+                        text: error.message || 'Hubo un error al eliminar el registro.',
+                        icon: 'error'
+                    });
+                });
+        }
+    });
+}
+
+// Función para confirmar eliminación del cliente
+function confirmarEliminacionCliente(id) {
+    Swal.fire({
+        title: '¿Estás seguro?',
+        text: '¿Quieres eliminar este usuario?',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#3085d6',
+        confirmButtonText: 'Sí, eliminar',
+        cancelButtonText: 'Cancelar'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            fetch(`../backend/eliminar_usuario.php?id=${id}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        Swal.fire(
+                            '¡Eliminado!',
+                            'El usuario ha sido eliminado.',
+                            'success'
+                        ).then(() => {
+                            // Recargar la página para actualizar la lista
+                            location.reload();
+                        });
+                    } else {
+                        Swal.fire(
+                            'Error',
+                            data.error || 'No se pudo eliminar el usuario',
+                            'error'
+                        );
+                    }
+                })
+                .catch(error => {
+                    Swal.fire(
+                        'Error',
+                        'Hubo un problema al procesar la solicitud',
+                        'error'
+                    );
+                });
+        }
+    });
+}
+</script>
+    <style>
+        .swal-wide {
+            width: 600px !important;
+        }
+    </style>
+    <script>
+function mostrarSweetAlert() {
+    Swal.fire({
+        title: 'Seleccionar Rango de Fechas y Tipo de Exportación',
+        html: `
+            <label for="fechaInicio">Fecha Inicio:</label>
+            <input type="date" id="fechaInicio" class="swal2-input">
+
+            <label for="fechaFin">Fecha Fin:</label>
+            <input type="date" id="fechaFin" class="swal2-input">
+
+            <label for="tipoExportacion">Seleccionar Exportación:</label>
+            <select id="tipoExportacion" class="swal2-select" style="width: 70%; padding: 8px;">
+                <option value="" disabled selected>Seleccione una opción</option>
+                <option value="backend/exportar_excel_pcba.php">Exportar PCBA</option>
+                <option value="backend/exportar_excel_materiales.php">Exportar Materiales</option>
+                <option value="backend/exportar_excel_molex_42.php">Exportar Molex SEM 42</option>
+                <option value="backend/exportar_excel_molex_43.php">Exportar Molex SEM 43</option>
+                <option value="backend/exportar_excel_molex_44.php">Exportar Molex SEM 44</option>
+                <option value="backend/exportar_excel_molex_45.php">Exportar Molex SEM 45</option>
+                <option value="backend/exportar_excel_molex_46.php">Exportar Molex SEM 46</option>
+                <option value="backend/exportar_excel_molex_47.php">Exportar Molex SEM 47</option>
+                <option value="backend/exportar_excel_molex_48.php">Exportar Molex SEM 48</option>
+                <option value="backend/exportar_excel_molex_49.php">Exportar Molex SEM 49</option>
+                <option value="backend/exportar_excel_molex_50.php">Exportar Molex SEM 50</option>
+                <option value="backend/exportar_excel_molex_51.php">Exportar Molex SEM 51</option>
+                <option value="backend/exportar_excel_molex_52.php">Exportar Molex SEM 52</option>
+            </select>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'Exportar',
+        cancelButtonText: 'Cancelar',
+        preConfirm: () => {
+            let fechaInicio = document.getElementById("fechaInicio").value;
+            let fechaFin = document.getElementById("fechaFin").value;
+            let tipoExportacion = document.getElementById("tipoExportacion").value;
+
+            if (!fechaInicio || !fechaFin || !tipoExportacion) {
+                Swal.showValidationMessage("Por favor, selecciona un rango de fechas y un tipo de exportación.");
+                return false;
+            }
+
+            Swal.fire({
+                title: 'Validando...',
+                text: 'Por favor, espera mientras validamos los datos.',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+
+            return fetch(`${tipoExportacion}?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}&validar=1`)
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === "error") {
+            throw new Error(data.message);
+        }
+
+        Swal.close();
+        window.location.href = `${tipoExportacion}?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`;
+    })
+    .catch(error => {
+        Swal.fire({
+            title: 'Error',
+            text: error.message || "Ocurrió un error inesperado.",
+            icon: 'error'
+        });
+    });
+
+        }
+    });
+}
+
+    </script>
+<script>
+ 
+ function generarContraseña(longitud) {
+     const caracteres = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
+     let contraseña = '';
+     for (let i = 0; i < longitud; i++) {
+         const randomIndex = Math.floor(Math.random() * caracteres.length);
+         contraseña += caracteres.charAt(randomIndex);
+     }
+     return contraseña;
+ }
+
+
+ function sugerirContraseñaCliente() {
+     const contraseñaSugerida = generarContraseña(12);
+     document.getElementById('password_cliente').value = contraseñaSugerida;
+ }
+
+
+ const togglePasswordCliente = document.querySelector("#togglePasswordCliente");
+ const passwordFieldCliente = document.querySelector("#password_cliente");
+ const eyeIconCliente = document.querySelector("#eyeIconCliente");
+
+ togglePasswordCliente.addEventListener("click", function () {
+     if (passwordFieldCliente.type === "password") {
+         passwordFieldCliente.type = "text";
+         eyeIconCliente.classList.remove("fa-eye");
+         eyeIconCliente.classList.add("fa-eye-slash");
+     } else {
+         passwordFieldCliente.type = "password";
+         eyeIconCliente.classList.remove("fa-eye-slash");
+         eyeIconCliente.classList.add("fa-eye");
+     }
+ });
+</script>
+
+<div class="modal fade" id="editarModalCliente" tabindex="-1" aria-labelledby="editarModalClienteLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header" style="background-color: #0d6efd; color: white;">
+                <h5 class="modal-title" id="editarModalClienteLabel">Editar Usuario</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formEditarCliente" method="POST" action="../backend/actualizar_usuario.php">
+                    <input type="hidden" id="edit_id_usuario" name="id_usuario">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Compañía</label>
+                            <input type="text" class="form-control" id="edit_cliente_compania" name="compania" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Business Unit</label>
+                            <input type="text" class="form-control" id="edit_cliente_business_unit" name="business_unit" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Nombre</label>
+                            <input type="text" class="form-control" id="edit_cliente_nombre" name="nombre" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Apellido</label>
+                            <input type="text" class="form-control" id="edit_cliente_apellido" name="apellido" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Correo Electrónico</label>
+                            <input type="email" class="form-control" id="edit_cliente_correo" name="correo" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Teléfono</label>
+                            <input type="tel" class="form-control" id="edit_cliente_telefono" name="telefono" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Nueva Contraseña (dejar en blanco para mantener la actual)</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="edit_cliente_password" name="password">
+                                <span class="input-group-text" id="togglePasswordCliente">
+                                    <i class="fas fa-eye" id="eyeIconCliente"></i>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="cerrarModalEditarCliente()">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+
+function cargarDatosCliente(id) {
+    
+    fetch(`../backend/obtener_usuario.php?id=${id}`)
+        .then(response => {
+           
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+           
+            
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            
+         
+            const fields = {
+                'edit_id_usuario': data.id_usuarios,
+                'edit_cliente_compania': data.compania,
+                'edit_cliente_business_unit': data.business_unit,
+                'edit_cliente_nombre': data.nombre,
+                'edit_cliente_apellido': data.apellido,
+                'edit_cliente_correo': data.correo,
+                'edit_cliente_telefono': data.telefono
+            };
+            
+          
+            for (const [fieldId, value] of Object.entries(fields)) {
+                const element = document.getElementById(fieldId);
+                if (element) {
+                    element.value = value || '';
+                } else {
+                    console.error(`Elemento no encontrado: ${fieldId}`);
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error al cargar los datos del usuario: ' + error.message);
+        });
+}
+
+
+function confirmarEliminacionCliente(id) {
+    Swal.fire({
+        title: '¿Estás seguro?',
+        text: '¿Quieres eliminar este usuario?',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#3085d6',
+        confirmButtonText: 'Sí, eliminar',
+        cancelButtonText: 'Cancelar'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            fetch(`../backend/eliminar_usuario.php?id=${id}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        Swal.fire(
+                            '¡Eliminado!',
+                            'El usuario ha sido eliminado.',
+                            'success'
+                        ).then(() => {
+                           
+                            location.reload();
+                        });
+                    } else {
+                        Swal.fire(
+                            'Error',
+                            data.error || 'No se pudo eliminar el usuario',
+                            'error'
+                        );
+                    }
+                })
+                .catch(error => {
+                    Swal.fire(
+                        'Error',
+                        'Hubo un problema al procesar la solicitud',
+                        'error'
+                    );
+                });
+        }
+    });
+}
+
+
+function cerrarModalEditarCliente() {
+    const modal = bootstrap.Modal.getInstance(document.getElementById('editarModalCliente'));
+    if (modal) {
+        modal.hide();
+        location.reload();
+    }
+}
+
+
+document.addEventListener('DOMContentLoaded', function() {
+    const togglePasswordCliente = document.querySelector("#togglePasswordCliente");
+    const passwordFieldCliente = document.querySelector("#edit_cliente_password");
+    const eyeIconCliente = document.querySelector("#eyeIconCliente");
+
+    if (togglePasswordCliente && passwordFieldCliente && eyeIconCliente) {
+        togglePasswordCliente.addEventListener("click", function () {
+            if (passwordFieldCliente.type === "password") {
+                passwordFieldCliente.type = "text";
+                eyeIconCliente.classList.remove("fa-eye");
+                eyeIconCliente.classList.add("fa-eye-slash");
+            } else {
+                passwordFieldCliente.type = "password";
+                eyeIconCliente.classList.remove("fa-eye-slash");
+                eyeIconCliente.classList.add("fa-eye");
+            }
+        });
+    }
+
+   
+    const editarModalCliente = document.getElementById('editarModalCliente');
+    if (editarModalCliente) {
+        editarModalCliente.addEventListener('hidden.bs.modal', function () {
+            location.reload();
+        });
+    }
+});
+</script>
+</body>
+
+</html>

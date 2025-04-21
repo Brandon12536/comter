@@ -1,0 +1,1502 @@
+<?php
+session_start();
+require '../../config/connection.php';
+if (!isset($_SESSION['id_proveedor'])) {
+  echo 'La sesión no tiene el id_proveedor.';
+  exit();
+}
+
+$id_proveedor = $_SESSION['id_proveedor'];
+
+
+$db = new Database();
+$con = $db->conectar();
+
+$sql = "SELECT nombre, apellido, compania, business_unit, telefono, correo, role, puesto, created_at, updated_at
+      FROM proveedores 
+      WHERE id_proveedor = :id_proveedor";
+$stmt = $con->prepare($sql);
+$stmt->bindParam(':id_proveedor', $id_proveedor, PDO::PARAM_INT);
+$stmt->execute();
+
+if ($stmt->rowCount() > 0) {
+
+  $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+  $nombre = $row['nombre'];
+  $apellido = $row['apellido'];
+  $compania = $row['compania'];
+  $business_unit = $row['business_unit'];
+  $telefono = $row['telefono'];
+  $correo = $row['correo'];
+  $role = $row['role'];
+  $puesto = $row['puesto'];
+  $created_at = $row['created_at'];
+  $updated_at = $row['updated_at'];
+
+  $photo = '../../assets/img/avatars/1.png';
+
+} else {
+  echo 'Proveedor no encontrado o cuenta no válida.';
+  exit();
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+  $inspection_date = $_POST['inspection_date'];
+  $description = $_POST['description'];
+  $shift = $_POST['shift'];
+  $operators = $_POST['operators'];
+  $goods = $_POST['goods'];
+  $fails_dedos_oro = !empty($_POST['fails_dedos_oro']) ? $_POST['fails_dedos_oro'] : 0;
+  $fails_mal_corte = !empty($_POST['fails_mal_corte']) ? $_POST['fails_mal_corte'] : 0;
+  $fails_contaminacion = !empty($_POST['fails_contaminacion']) ? $_POST['fails_contaminacion'] : 0;
+  $pd = !empty($_POST['pd']) ? $_POST['pd'] : 0;
+  $fails_desplazados = !empty($_POST['fails_desplazados']) ? $_POST['fails_desplazados'] : 0;
+  $fails_insuficiencias = !empty($_POST['fails_insuficiencias']) ? $_POST['fails_insuficiencias'] : 0;
+  $fails_despanelizados = !empty($_POST['fails_despanelizados']) ? $_POST['fails_despanelizados'] : 0;
+  $fails_desprendidos = !empty($_POST['fails_desprendidos']) ? $_POST['fails_desprendidos'] : 0;
+  $total_fails = !empty($_POST['total_fails']) ? $_POST['total_fails'] : 0;
+  $total = !empty($_POST['total']) ? $_POST['total'] : 0;
+  $yield = $_POST['yield'];
+  $comments = $_POST['comments'];
+
+  $missing_fields = [];
+
+  if (empty($inspection_date)) {
+    $missing_fields[] = 'Inspection Date';
+  }
+  if (empty($description)) {
+    $missing_fields[] = 'Description';
+  }
+  if (empty($shift)) {
+    $missing_fields[] = 'Shift';
+  }
+  if (empty($operators)) {
+    $missing_fields[] = 'Operators';
+  }
+  if (empty($goods)) {
+    $missing_fields[] = 'Total Goods';
+  }
+
+  if (!empty($missing_fields)) {
+    $fields = implode(', ', $missing_fields);
+    $_SESSION['error_message'] = 'Por favor, rellene los siguientes campos obligatorios: ' . $fields . '.';
+    header('Location: ' . $_SERVER['PHP_SELF']);
+    exit();
+  }
+
+  $sql_turno = "SELECT p.id_turno 
+              FROM proveedores p
+              WHERE p.id_proveedor = :id_proveedor";
+
+  $stmt_turno = $con->prepare($sql_turno);
+  $stmt_turno->bindParam(':id_proveedor', $id_proveedor, PDO::PARAM_INT);
+  $stmt_turno->execute();
+
+  $turno = $stmt_turno->fetch(PDO::FETCH_ASSOC);
+  $id_turno = $turno ? $turno['id_turno'] : null;
+
+  if ($id_turno) {
+    $sql_turno_nombre = "SELECT nombre_turno FROM turnos WHERE id_turno = :id_turno";
+    $stmt_turno_nombre = $con->prepare($sql_turno_nombre);
+    $stmt_turno_nombre->bindParam(':id_turno', $id_turno, PDO::PARAM_INT);
+    $stmt_turno_nombre->execute();
+
+    $turno_nombre = $stmt_turno_nombre->fetch(PDO::FETCH_ASSOC);
+    $nombre_turno = $turno_nombre ? $turno_nombre['nombre_turno'] : 'No asignado';
+  } else {
+    $nombre_turno = 'No asignado';
+  }
+
+  $sqlInsert = "INSERT INTO PCBA 
+    (inspection_date, description, shift, operators, goods, fails_dedos_oro, fails_mal_corte, fails_contaminacion, pd, fails_desplazados, fails_insuficiencias, fails_despanelizados, fails_desprendidos, total_fails, total, yield, comments, user_id) 
+    VALUES 
+    (:inspection_date, :description, :shift, :operators, :goods, :fails_dedos_oro, :fails_mal_corte, :fails_contaminacion, :pd, :fails_desplazados, :fails_insuficiencias, :fails_despanelizados, :fails_desprendidos, :total_fails, :total, :yield, :comments, :user_id)";
+
+  $stmt = $con->prepare($sqlInsert);
+
+  $stmt->bindParam(':inspection_date', $inspection_date);
+  $stmt->bindParam(':description', $description);
+  $stmt->bindParam(':shift', $nombre_turno);
+  $stmt->bindParam(':operators', $operators);
+  $stmt->bindParam(':goods', $goods);
+  $stmt->bindParam(':fails_dedos_oro', $fails_dedos_oro);
+  $stmt->bindParam(':fails_mal_corte', $fails_mal_corte);
+  $stmt->bindParam(':fails_contaminacion', $fails_contaminacion);
+  $stmt->bindParam(':pd', $pd);
+  $stmt->bindParam(':fails_desplazados', $fails_desplazados);
+  $stmt->bindParam(':fails_insuficiencias', $fails_insuficiencias);
+  $stmt->bindParam(':fails_despanelizados', $fails_despanelizados);
+  $stmt->bindParam(':fails_desprendidos', $fails_desprendidos);
+  $stmt->bindParam(':total_fails', $total_fails);
+  $stmt->bindParam(':total', $total);
+  $stmt->bindParam(':yield', $yield);
+  $stmt->bindParam(':comments', $comments);
+  $stmt->bindParam(':user_id', $id_proveedor);
+
+  if ($stmt->execute()) {
+    $_SESSION['success_message'] = 'Record added successfully!';
+    header('Location: molexpcba.php');
+    exit();
+  } else {
+    $_SESSION['error_message'] = 'Error while inserting the record. Please try again.';
+    header('Location: molexpcba.php');
+    exit();
+  }
+
+}
+
+$records_per_page = 100;
+
+$current_page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
+
+$offset = ($current_page - 1) * $records_per_page;
+
+$total_records_sql = "SELECT COUNT(*) FROM PCBA WHERE user_id = :user_id";
+$total_records_stmt = $con->prepare($total_records_sql);
+$total_records_stmt->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$total_records_stmt->execute();
+$total_records = $total_records_stmt->fetchColumn();
+
+$total_pages = ceil($total_records / $records_per_page);
+
+$offset = ($current_page - 1) * $records_per_page;
+
+$sql_select = "SELECT * FROM PCBA WHERE user_id = :user_id ORDER BY inspection_date ASC LIMIT :offset, :records_per_page";
+$stmt_select = $con->prepare($sql_select);
+
+$stmt_select->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$stmt_select->bindParam(':offset', $offset, PDO::PARAM_INT);
+$stmt_select->bindParam(':records_per_page', $records_per_page, PDO::PARAM_INT);
+$stmt_select->execute();
+
+$records = $stmt_select->fetchAll(PDO::FETCH_ASSOC);
+
+$sql_sum_goods = "SELECT SUM(goods) AS total_goods FROM PCBA WHERE user_id = :user_id";
+$stmt_sum_goods = $con->prepare($sql_sum_goods);
+$stmt_sum_goods->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$stmt_sum_goods->execute();
+$row_sum_goods = $stmt_sum_goods->fetch(PDO::FETCH_ASSOC);
+
+$total_goods = $row_sum_goods['total_goods'] ?? 0;
+
+$sql_sum_fails_dedos_oro = "SELECT SUM(fails_dedos_oro) AS total_fails_dedos_oro FROM PCBA WHERE user_id = :user_id";
+$stmt_sum_fails_dedos_oro = $con->prepare($sql_sum_fails_dedos_oro);
+$stmt_sum_fails_dedos_oro->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$stmt_sum_fails_dedos_oro->execute();
+$row_sum_fails_dedos_oro = $stmt_sum_fails_dedos_oro->fetch(PDO::FETCH_ASSOC);
+$total_fails_dedos_oro = $row_sum_fails_dedos_oro['total_fails_dedos_oro'] ?? 0;
+
+$sql_sum_fails_mal_corte = "SELECT SUM(fails_mal_corte) AS total_fails_mal_corte FROM PCBA WHERE user_id = :user_id";
+$stmt_sum_fails_mal_corte = $con->prepare($sql_sum_fails_mal_corte);
+$stmt_sum_fails_mal_corte->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$stmt_sum_fails_mal_corte->execute();
+$row_sum_fails_mal_corte = $stmt_sum_fails_mal_corte->fetch(PDO::FETCH_ASSOC);
+$total_fails_mal_corte = $row_sum_fails_mal_corte['total_fails_mal_corte'] ?? 0;
+
+$sql_sum_fails_contaminacion = "SELECT SUM(fails_contaminacion) AS total_fails_contaminacion FROM PCBA WHERE user_id = :user_id";
+$stmt_sum_fails_contaminacion = $con->prepare($sql_sum_fails_contaminacion);
+$stmt_sum_fails_contaminacion->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$stmt_sum_fails_contaminacion->execute();
+$row_sum_fails_contaminacion = $stmt_sum_fails_contaminacion->fetch(PDO::FETCH_ASSOC);
+$total_fails_contaminacion = $row_sum_fails_contaminacion['total_fails_contaminacion'] ?? 0;
+
+$sql_sum_pd = "SELECT SUM(pd) AS total_pd FROM PCBA WHERE user_id = :user_id";
+$stmt_sum_pd = $con->prepare($sql_sum_pd);
+$stmt_sum_pd->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$stmt_sum_pd->execute();
+$row_sum_pd = $stmt_sum_pd->fetch(PDO::FETCH_ASSOC);
+$total_pd = $row_sum_pd['total_pd'] ?? 0;
+
+$sql_sum_fails_desplazados = "SELECT SUM(fails_desplazados) AS total_fails_desplazados FROM PCBA WHERE user_id = :user_id";
+$stmt_sum_fails_desplazados = $con->prepare($sql_sum_fails_desplazados);
+$stmt_sum_fails_desplazados->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$stmt_sum_fails_desplazados->execute();
+$row_sum_fails_desplazados = $stmt_sum_fails_desplazados->fetch(PDO::FETCH_ASSOC);
+$total_fails_desplazados = $row_sum_fails_desplazados['total_fails_desplazados'] ?? 0;
+
+$sql_sum_fails_insuficiencias = "SELECT SUM(fails_insuficiencias) AS total_fails_insuficiencias FROM PCBA WHERE user_id = :user_id";
+$stmt_sum_fails_insuficiencias = $con->prepare($sql_sum_fails_insuficiencias);
+$stmt_sum_fails_insuficiencias->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$stmt_sum_fails_insuficiencias->execute();
+$row_sum_fails_insuficiencias = $stmt_sum_fails_insuficiencias->fetch(PDO::FETCH_ASSOC);
+$total_fails_insuficiencias = $row_sum_fails_insuficiencias['total_fails_insuficiencias'] ?? 0;
+
+$sql_sum_fails_despanelizados = "SELECT SUM(fails_despanelizados) AS total_fails_despanelizados FROM PCBA WHERE user_id = :user_id";
+$stmt_sum_fails_despanelizados = $con->prepare($sql_sum_fails_despanelizados);
+$stmt_sum_fails_despanelizados->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$stmt_sum_fails_despanelizados->execute();
+$row_sum_fails_despanelizados = $stmt_sum_fails_despanelizados->fetch(PDO::FETCH_ASSOC);
+$total_fails_despanelizados = $row_sum_fails_despanelizados['total_fails_despanelizados'] ?? 0;
+
+$sql_sum_fails_desprendidos = "SELECT SUM(fails_desprendidos) AS total_fails_desprendidos FROM PCBA WHERE user_id = :user_id";
+$stmt_sum_fails_desprendidos = $con->prepare($sql_sum_fails_desprendidos);
+$stmt_sum_fails_desprendidos->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$stmt_sum_fails_desprendidos->execute();
+$row_sum_fails_desprendidos = $stmt_sum_fails_desprendidos->fetch(PDO::FETCH_ASSOC);
+$total_fails_desprendidos = $row_sum_fails_desprendidos['total_fails_desprendidos'] ?? 0;
+
+$sql_sum_total_fails = "SELECT SUM(total_fails) AS total_total_fails FROM PCBA WHERE user_id = :user_id";
+$stmt_sum_total_fails = $con->prepare($sql_sum_total_fails);
+$stmt_sum_total_fails->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$stmt_sum_total_fails->execute();
+$row_sum_total_fails = $stmt_sum_total_fails->fetch(PDO::FETCH_ASSOC);
+$total_total_fails = $row_sum_total_fails['total_total_fails'] ?? 0;
+
+$sql_sum_total = "SELECT SUM(total) AS total_total FROM PCBA WHERE user_id = :user_id";
+$stmt_sum_total = $con->prepare($sql_sum_total);
+$stmt_sum_total->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+$stmt_sum_total->execute();
+$row_sum_total = $stmt_sum_total->fetch(PDO::FETCH_ASSOC);
+$total_total = $row_sum_total['total_total'] ?? 0;
+
+if ($total_total != 0) {
+  $result_division = ($total_goods / $total_total) * 100;
+} else {
+  $result_division = 0;
+}
+
+$result_division = round($result_division);
+
+function getUniqueValues($column, $con, $id_proveedor)
+{
+  $sql = "SELECT DISTINCT $column FROM PCBA WHERE $column IS NOT NULL AND $column != '' AND user_id = :user_id ORDER BY $column";
+  $stmt = $con->prepare($sql);
+  $stmt->bindParam(':user_id', $id_proveedor, PDO::PARAM_INT);
+  $stmt->execute();
+  return $stmt->fetchAll(PDO::FETCH_COLUMN);
+}
+
+$descripcion_values = getUniqueValues('description', $con, $id_proveedor);
+$shift_values = getUniqueValues('shift', $con, $id_proveedor);
+$operators_values = getUniqueValues('operators', $con, $id_proveedor);
+$goods_values = getUniqueValues('goods', $con, $id_proveedor);
+$dedos_oro_values = getUniqueValues('fails_dedos_oro', $con, $id_proveedor);
+$faltante_values = getUniqueValues('fails_mal_corte', $con, $id_proveedor);
+$contaminacion_values = getUniqueValues('fails_contaminacion', $con, $id_proveedor);
+$pd_values = getUniqueValues('pd', $con, $id_proveedor);
+$desplazados_values = getUniqueValues('fails_desplazados', $con, $id_proveedor);
+$insuficiencias_values = getUniqueValues('fails_insuficiencias', $con, $id_proveedor);
+$despanelizados_values = getUniqueValues('fails_despanelizados', $con, $id_proveedor);
+$desprendidos_values = getUniqueValues('fails_desprendidos', $con, $id_proveedor);
+$total_values = getUniqueValues('total_fails', $con, $id_proveedor);
+$total_final_values = getUniqueValues('total', $con, $id_proveedor);
+$yield_values = getUniqueValues('yield', $con, $id_proveedor);
+
+
+if (isset($id_proveedor) && is_numeric($id_proveedor)) {
+  $sql = "SELECT permiso_editar, permiso_capturar FROM roles_permisos WHERE id_proveedor = :id_proveedor AND activo = 1";
+
+  try {
+    $stmt = $con->prepare($sql);
+    $stmt->bindParam(':id_proveedor', $id_proveedor, PDO::PARAM_INT);
+    $stmt->execute();
+
+    $permisos = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($permisos) {
+      $puedeEditar = (bool) $permisos['permiso_editar'];
+      $puedeCapturar = (bool) $permisos['permiso_capturar'];
+    } else {
+      $puedeEditar = false;
+      $puedeCapturar = false;
+    }
+  } catch (PDOException $e) {
+    echo "Error en la consulta: " . $e->getMessage();
+  }
+} else {
+  $puedeEditar = false;
+  $puedeCapturar = false;
+}
+?>
+
+
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&display=swap"
+    rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="../../assets/vendor/fonts/boxicons.css" />
+  <link rel="stylesheet" href="../../assets/vendor/css/core.css" class="template-customizer-core-css" />
+  <link rel="stylesheet" href="../../assets/vendor/css/theme-default.css" class="template-customizer-theme-css" />
+  <link rel="stylesheet" href="../../assets/css/demo.css" />
+  <link rel="stylesheet" href="../../assets/vendor/libs/perfect-scrollbar/perfect-scrollbar.css" />
+  <link rel="stylesheet" href="../../assets/vendor/libs/apex-charts/apex-charts.css" />
+  <script src="../../assets/vendor/js/helpers.js"></script>
+  <script src="../../assets/js/config.js"></script>
+  <link rel="stylesheet" href="../css/styles.css">
+  <link rel="stylesheet" href="../css/style_pcba_block_button.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <link rel="shortcut icon" href="../ico/comter.png" type="image/x-icon">
+
+  <title>Molex PCBA</title>
+</head>
+
+<body>
+
+
+
+  <div class="layout-wrapper layout-content-navbar">
+    <div class="layout-container">
+
+
+      <aside id="layout-menu" class="layout-menu menu-vertical menu bg-menu-theme">
+        <div class="app-brand demo">
+          <a href="../admin_panel.php" class="app-brand-link">
+            <span class="app-brand-logo demo">
+              <img src="../ico/comter.png" alt="" width="50">
+              <g id="g-app-brand" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+                <g id="Brand-Logo" transform="translate(-27.000000, -15.000000)">
+                  <g id="Icon" transform="translate(27.000000, 15.000000)">
+                    <g id="Mask" transform="translate(0.000000, 8.000000)">
+                      <mask id="mask-2" fill="white">
+                        <use xlink:href="#path-1"></use>
+                      </mask>
+                      <use fill="#696cff" xlink:href="#path-1"></use>
+                      <g id="Path-3" mask="url(#mask-2)">
+                        <use fill="#696cff" xlink:href="#path-3"></use>
+                        <use fill-opacity="0.2" fill="#FFFFFF" xlink:href="#path-3"></use>
+                      </g>
+                      <g id="Path-4" mask="url(#mask-2)">
+                        <use fill="#696cff" xlink:href="#path-4"></use>
+                        <use fill-opacity="0.2" fill="#FFFFFF" xlink:href="#path-4"></use>
+                      </g>
+                    </g>
+                    <g id="Triangle"
+                      transform="translate(19.000000, 11.000000) rotate(-300.000000) translate(-19.000000, -11.000000) ">
+                      <use fill="#696cff" xlink:href="#path-5"></use>
+                      <use fill-opacity="0.2" fill="#FFFFFF" xlink:href="#path-5"></use>
+                    </g>
+                  </g>
+                </g>
+              </g>
+              </svg>
+            </span>
+            <span class="app-brand-text demo menu-text fw-bolder ms-2">COMTER</span>
+          </a>
+
+          <a href="javascript:void(0);" class="layout-menu-toggle menu-link text-large ms-auto d-block d-xl-none">
+            <i class="bx bx-chevron-left bx-sm align-middle"></i>
+          </a>
+        </div>
+
+        <div class="menu-inner-shadow"></div>
+
+        <ul class="menu-inner py-1">
+
+          <!--<li class="menu-item active">
+            <a href="../admin_panel.php" class="menu-link">
+              <i class="menu-icon tf-icons bx bx-home-circle"></i>
+              <div data-i18n="Analytics">Dashboard</div>
+            </a>
+          </li>-->
+
+          <li class="menu-item active">
+    <a href="semanas.php" class="menu-link">
+        <i class="menu-icon tf-icons bx bx-calendar-week"></i>
+        <div data-i18n="Analytics">Nuevo Reporte</div>
+    </a>
+</li>
+          <li class="menu-item">
+            <a href="javascript:void(0);" class="menu-link menu-toggle">
+              <i class="menu-icon tf-icons bx bx-layout"></i>
+              <div data-i18n="Layouts">Reportes</div>
+            </a>
+
+            <ul class="menu-sub">
+              <li class="menu-item">
+                <a href="molexpcba.php" class="menu-link">
+                  <div data-i18n="Without menu">MOLEX PCBA - Material Acumulado o de Almacén</div>
+                </a>
+              </li>
+              <li class="menu-item">
+                <a href="matsmt.php" class="menu-link">
+                  <div data-i18n="Without menu">MATERIAL DE SMT (MAT.FRESCO)</div>
+                </a>
+              </li>
+              <li class="menu-item">
+                <a href="molexsem42.php" class="menu-link">
+                  <div data-i18n="Without navbar">Molex SEM42</div>
+                </a>
+              </li>
+              <li class="menu-item">
+                <a href="molexsem43.php" class="menu-link">
+                  <div data-i18n="Without navbar">Molex SEM43</div>
+                </a>
+              </li>
+              <li class="menu-item">
+                <a href="molexsem44.php" class="menu-link">
+                  <div data-i18n="Without navbar">Molex SEM44</div>
+                </a>
+              </li>
+              <li class="menu-item">
+                <a href="molexsem45.php" class="menu-link">
+                  <div data-i18n="Without navbar">Molex SEM45</div>
+                </a>
+              </li>
+              <li class="menu-item">
+                <a href="molexsem46.php" class="menu-link">
+                  <div data-i18n="Without navbar">Molex SEM46</div>
+                </a>
+              </li>
+              <li class="menu-item">
+                <a href="molexsem47.php" class="menu-link">
+                  <div data-i18n="Without navbar">Molex SEM47</div>
+                </a>
+              </li>
+              <li class="menu-item">
+                <a href="molexsem48.php" class="menu-link">
+                  <div data-i18n="Without navbar">Molex SEM48</div>
+                </a>
+              </li>
+              <li class="menu-item">
+                <a href="molexsem49.php" class="menu-link">
+                  <div data-i18n="Without navbar">Molex SEM49</div>
+                </a>
+              </li>
+              <li class="menu-item">
+                <a href="molexsem50.php" class="menu-link">
+                  <div data-i18n="Without navbar">Molex SEM50</div>
+                </a>
+              </li>
+              <li class="menu-item">
+                <a href="molexsem51.php" class="menu-link">
+                  <div data-i18n="Without navbar">Molex SEM51</div>
+                </a>
+              </li>
+              <li class="menu-item">
+                <a href="molexsem52.php" class="menu-link">
+                  <div data-i18n="Without navbar">Molex SEM52</div>
+                </a>
+              </li>
+
+
+            </ul>
+          </li>
+          <li class="mt-2">
+            <ul>
+
+              <div>
+                <!--<form action="../backend/exportar_excel_pcba.php" method="post">
+                  <button type="submit" class="btn btn-success mb-4" id="exportButton" disabled style="width: 100%;">
+                    <i class="bx bxs-file"></i> Export to Excel
+                  </button>
+                </form>-->
+                <form action="../backend/exportar_excel_pcba.php" method="post">
+                  <button type="submit" class="btn btn-success mb-4" id="exportButton" style="width: 100%;">
+                    <i class="bx bxs-file"></i> Exportar a Excel
+                  </button>
+                </form>
+              </div>
+
+              <div>
+                <button type="button" class="btn btn-primary mb-4 add" data-bs-toggle="modal"
+                  data-bs-target="#addRecordModal" style="width: 100%;">
+                  <i class="bx bx-plus"></i> Agregar registro
+                </button>
+              </div>
+              <button id="resetFilters" class="btn btn-danger mb-3" style="width: 100%;"><i class="bx bx-reset"></i>
+              Reiniciar Filtros</button>
+            </ul>
+          </li>
+        </ul>
+        </li>
+
+
+      </aside>
+
+
+      
+<style>
+  
+  @media (min-width: 769px) { 
+        .layout-page {
+            margin-left: 250px;
+            padding: 20px;
+        }
+
+        #layout-menu {
+            position: fixed; 
+            top: 0; 
+            left: 0;
+            width: 250px;
+            height: 100%; 
+            overflow-y: auto; 
+            z-index: 1000; 
+        }
+    }
+
+    @media (max-width: 768px) { 
+        .layout-page {
+            margin-left: 0;
+            padding: 20px;
+        }
+
+        #layout-menu {
+            position: relative; 
+            width: 100%; 
+            height: auto;
+        }
+    }
+</style>
+      <div class="layout-page">
+
+        <nav
+          class="layout-navbar container-xxl navbar navbar-expand-xl navbar-detached align-items-center bg-navbar-theme"
+          id="layout-navbar">
+          <div class="layout-menu-toggle navbar-nav align-items-xl-center me-3 me-xl-0 d-xl-none">
+            <a class="nav-item nav-link px-0 me-xl-4" href="javascript:void(0)">
+              <i class="bx bx-menu bx-sm"></i>
+            </a>
+          </div>
+
+          <div class="navbar-nav-right d-flex align-items-center" id="navbar-collapse">
+
+            <div class="navbar-nav align-items-center">
+              <div class="nav-item d-flex align-items-center">
+                <!--<form method="GET" action="search_molex_pcba.php" class="d-flex align-items-center">
+                  <input type="text" name="search" class="form-control border-0 shadow-none"
+                    placeholder="Buscar por Operador..." aria-label="Search..."
+                    value="<?= isset($_GET['search']) ? htmlspecialchars($_GET['search']) : '' ?>" />
+                  <button type="submit" class="btn border-0 bg-transparent p-0 ms-2">
+                    <i class="bx bx-search fs-4 lh-0"></i>
+                  </button>
+
+                  <a href="molexpcba.php" class="btn border-0 bg-transparent p-0 ms-2">
+                    <i class="bx bx-x fs-4 lh-0"></i>
+                  </a>
+                </form>-->
+              </div>
+            </div>
+
+
+            <ul class="navbar-nav flex-row align-items-center ms-auto">
+
+
+
+              <li class="fw-semibold d-block">BIENVENIDO COMTER </li> &nbsp;&nbsp;&nbsp;<span
+                class="fw-semibold d-block"><?php echo $nombre . ' ' . $apellido; ?></span>
+
+              <li class="nav-item navbar-dropdown dropdown-user dropdown">
+                <a class="nav-link dropdown-toggle hide-arrow" href="javascript:void(0);" data-bs-toggle="dropdown">
+                  <div class="avatar avatar-online">
+                    <img src="<?php echo $photo; ?>" alt="" class="w-px-40 h-auto rounded-circle" />
+                  </div>
+
+
+
+                </a>
+
+                <ul class="dropdown-menu dropdown-menu-end">
+                  <li>
+                    <a class="dropdown-item" href="#">
+                      <div class="d-flex">
+                        <div class="flex-shrink-0 me-3">
+                          <div class="avatar avatar-online">
+                            <img src="<?php echo $photo; ?>" alt="" class="w-px-40 h-auto rounded-circle" />
+                          </div>
+                        </div>
+                        <div class="flex-grow-1">
+                          <!--<span
+                                                        class="fw-semibold d-block"><?php echo $nombre . ' ' . $apellido; ?></span>-->
+                          <small class="text-muted">Rol: <?php echo $role; ?></small><br>
+                          <small class="text-muted">Puesto: <?php echo $puesto; ?></small>
+                        </div>
+
+
+                      </div>
+                    </a>
+                  </li>
+
+                  <li>
+                    <a class="dropdown-item" href="#" onclick="confirmLogout()">
+                      <i class="bx bx-power-off me-2"></i>
+                      <span class="align-middle">Cerrar sesión</span>
+                    </a>
+                  </li>
+                </ul>
+              </li>
+
+            </ul>
+          </div>
+        </nav>
+        <style>
+          .logo-style {
+            border-radius: 15px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+          }
+        </style>
+
+        <div class="content-wrapper">
+          <div class="container my-5">
+            <?php if (isset($_SESSION['success_message'])): ?>
+              <div class="alert alert-success"><?= $_SESSION['success_message'];
+              unset($_SESSION['success_message']); ?>
+              </div>
+            <?php endif; ?>
+
+            <?php if (isset($_SESSION['error_message'])): ?>
+              <div class="alert alert-danger"><?= $_SESSION['error_message'];
+              unset($_SESSION['error_message']); ?></div>
+            <?php endif; ?>
+
+            <div class="container">
+              <h3 class="text-center mt-3">Records PCBA</h3>
+              <div class="mt-5 d-flex justify-content-between">
+
+                <!--<div>
+                  <button type="button" class="btn btn-primary mb-4 add" data-bs-toggle="modal"
+                    data-bs-target="#addRecordModal">
+                    <i class="bx bx-plus"></i> Add Record
+                  </button>
+                </div>-->
+
+              </div>
+              <div class="table-responsive">
+
+                <!--<button id="resetFilters" class="btn btn-danger mb-3"><i class="bx bx-reset"></i> Reset Filters</button>-->
+                <div style="overflow-y: auto; max-height: 500px;">
+                  <table class="table table-bordered text-center" id="inspectionTable" style="border-color: black;">
+                    <thead style="background-color: #D9DAD9; position: sticky; top: 0; z-index: 10;">
+                      <tr>
+                        <th colspan="5" style="color:#000000; border-color: black;"> </th>
+                        <th colspan="7"
+                          style="background-color:#000000; color:#ffffff; text-align:center; border-color: black;">Fails
+                          Report</th>
+                        <th colspan="8" style="color:#000000; border-color: black;"></th>
+                      </tr>
+                      <tr>
+                        <?php date_default_timezone_set('America/Mexico_City'); ?>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          INSPECTION DATE
+                          <input id="filter_date" type="text" class="form-control form-control-sm mt-2"
+                            placeholder="Select Date" />
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          DESCRIPTION
+                          <select id="filter_description" class="form-select form-select-sm mt-2">
+                            <option value="">All</option>
+                            <?php
+                            if (!empty($descripcion_values)) {
+                              foreach ($descripcion_values as $descripcion) {
+                                if (!empty($descripcion)) {
+                                  echo "<option value=\"" . htmlspecialchars($descripcion) . "\">" . htmlspecialchars($descripcion) . "</option>";
+                                }
+                              }
+                            } else {
+                              echo "<option value=\"\">No descriptions available</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          SHIFT
+                          <select id="filter_shift" class="form-select form-select-sm mt-2">
+                            <option value="all" selected>All</option>
+                            <?php
+                            if ($id_turno) {
+                              echo "<option value=\"$id_turno\" selected>$nombre_turno</option>";
+                            } else {
+                              for ($i = 1; $i <= 10; $i++) {
+                                echo "<option value=\"$i\">$i</option>";
+                              }
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          OPERATORS
+                          <select id="filter_operators" class="form-select form-select-sm mt-2">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($operators_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#0fcb59; border-color: black;">
+                          GOODS
+                          <select id="filter_goods" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($goods_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          DEDOS DE ORO CONTAMINADOS
+                          <select id="filter_dedos_oro" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($dedos_oro_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          MAL CORTE
+                          <select id="filter_mal_corte" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($faltante_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          CONTAMINACION
+                          <select id="filter_contaminacion" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($contaminacion_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          PD
+                          <select id="filter_pd" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($pd_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          DESPLAZADOS
+                          <select id="filter_desplazados" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($desplazados_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          INSUFICIENCIAS
+                          <select id="filter_insuficiencias" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($insuficiencias_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          DESPANELIZADOS
+                          <select id="filter_despanelizados" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($despanelizados_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          DESPRENDIDOS
+                          <select id="filter_desprendidos" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($desprendidos_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          TOTAL
+                          <select id="filter_total" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($total_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#0fcb59; border-color: black;">
+                          TOTAL FINAL
+                          <select id="filter_total_final" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($total_final_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#0fcb59; border-color: black;">
+                          YIELD
+                          <select id="filter_yield" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <?php
+                            foreach ($yield_values as $value) {
+                              echo "<option value=\"$value\">$value</option>";
+                            }
+                            ?>
+                          </select>
+                        </th>
+                        <th class="text-center" style="color:#000000; border-color: black;">
+                          COMMENTS
+                          <select id="filter_comments" class="form-select form-select-sm">
+                            <option value="">All</option>
+                          </select>
+                        </th>
+                        <th style="color:#000000; border-color: black;">Acciones</th>
+                      </tr>
+                      <tr>
+                        <th colspan="4"
+                          style="background-color:#626262; color:#ffffff; text-align:center; border-color: black;">GRAN
+                          TOTAL / SEMANA 29</th>
+                        <th style="color:#000000; border-color: black;"><?php echo number_format($total_goods); ?></th>
+                        <th style="color:#000000; border-color: black;"><?php echo $total_fails_dedos_oro; ?></th>
+                        <th style="color:#000000; border-color: black;"><?php echo $total_fails_mal_corte; ?></th>
+                        <th style="color:#000000; border-color: black;"><?php echo $total_fails_contaminacion; ?></th>
+                        <th style="color:#000000; border-color: black;"><?php echo $total_pd; ?></th>
+                        <th style="color:#000000; border-color: black;"><?php echo $total_fails_desplazados; ?></th>
+                        <th style="color:#000000; border-color: black;"><?php echo $total_fails_insuficiencias; ?></th>
+                        <th style="color:#000000; border-color: black;"><?php echo $total_fails_despanelizados; ?></th>
+                        <th style="color:#000000; border-color: black;"><?php echo $total_fails_desprendidos; ?></th>
+                        <th style="color:#000000; border-color: black;"><?php echo $total_total_fails; ?></th>
+                        <th style="color:#000000; border-color: black;"><?php echo number_format($total_total); ?></th>
+                        <th style="color:#000000; border-color: black;"><?php echo $result_division . '%'; ?> </th>
+                        <th style="color:#000000; border-color: black;"></th>
+                        <th style="color:#000000; border-color: black;"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <?php if (empty($records)): ?>
+                        <tr>
+                          <td colspan="16" class="fw-bold text-danger" style="border-color: black;">No records available.
+                          </td>
+                        </tr>
+                      <?php else: ?>
+                        <?php foreach ($records as $record): ?>
+                          <tr>
+                            <td style="border-color: black; color:#000000;">
+                              <?php
+                              $date = new DateTime($record['inspection_date']);
+                              $dayOfWeek = $date->format('l');
+                              $daysInSpanish = [
+                                'Monday' => 'Lunes',
+                                'Tuesday' => 'Martes',
+                                'Wednesday' => 'Miércoles',
+                                'Thursday' => 'Jueves',
+                                'Friday' => 'Viernes',
+                                'Saturday' => 'Sábado',
+                                'Sunday' => 'Domingo'
+                              ];
+                              echo $date->format('d/m/y') . " - " . $daysInSpanish[$dayOfWeek];
+                              ?>
+                            </td>
+                            <td style="border-color: black; color:#000000;"><?= htmlspecialchars($record['description']) ?>
+                            </td>
+                            <td style="border-color: black; color:#000000;"><?= htmlspecialchars($record['shift']) ?></td>
+                            <td style="border-color: black; color:#000000;"><?= htmlspecialchars($record['operators']) ?>
+                            </td>
+                            <td style="border-color: black; color:#000000;"><?= htmlspecialchars($record['goods']) ?></td>
+                            <td
+                              style="border-color: black; <?= $record['fails_dedos_oro'] != 0 ? 'color:#FF0000; background-color: #FFCCCC;' : ''; ?>">
+                              <?= $record['fails_dedos_oro'] != 0 ? '<b>' . htmlspecialchars($record['fails_dedos_oro']) . '</b>' : htmlspecialchars($record['fails_dedos_oro']) ?>
+                            </td>
+                            <td
+                              style="border-color: black; <?= $record['fails_mal_corte'] != 0 ? 'color:#FF0000; background-color: #FFCCCC;' : ''; ?>">
+                              <?= $record['fails_mal_corte'] != 0 ? '<b>' . htmlspecialchars($record['fails_mal_corte']) . '</b>' : htmlspecialchars($record['fails_mal_corte']) ?>
+                            </td>
+                            <td
+                              style="border-color: black; <?= $record['fails_contaminacion'] != 0 ? 'color:#FF0000; background-color: #FFCCCC;' : ''; ?>">
+                              <?= $record['fails_contaminacion'] != 0 ? '<b>' . htmlspecialchars($record['fails_contaminacion']) . '</b>' : htmlspecialchars($record['fails_contaminacion']) ?>
+                            </td>
+                            <td
+                              style="border-color: black; <?= $record['pd'] != 0 ? 'color:#FF0000; background-color: #FFCCCC;' : ''; ?>">
+                              <?= $record['pd'] != 0 ? '<b>' . htmlspecialchars($record['pd']) . '</b>' : htmlspecialchars($record['pd']) ?>
+                            </td>
+                            <td
+                              style="border-color: black; <?= $record['fails_desplazados'] != 0 ? 'color:#FF0000; background-color: #FFCCCC;' : ''; ?>">
+                              <?= $record['fails_desplazados'] != 0 ? '<b>' . htmlspecialchars($record['fails_desplazados']) . '</b>' : htmlspecialchars($record['fails_desplazados']) ?>
+                            </td>
+                            <td
+                              style="border-color: black; <?= $record['fails_insuficiencias'] != 0 ? 'color:#FF0000; background-color: #FFCCCC;' : ''; ?>">
+                              <?= $record['fails_insuficiencias'] != 0 ? '<b>' . htmlspecialchars($record['fails_insuficiencias']) . '</b>' : htmlspecialchars($record['fails_insuficiencias']) ?>
+                            </td>
+                            <td
+                              style="border-color: black; <?= $record['fails_despanelizados'] != 0 ? 'color:#FF0000; background-color: #FFCCCC;' : ''; ?>">
+                              <?= $record['fails_despanelizados'] != 0 ? '<b>' . htmlspecialchars($record['fails_despanelizados']) . '</b>' : htmlspecialchars($record['fails_despanelizados']) ?>
+                            </td>
+                            <td
+                              style="border-color: black; <?= $record['fails_desprendidos'] != 0 ? 'color:#FF0000; background-color: #FFCCCC;' : ''; ?>">
+                              <?= $record['fails_desprendidos'] != 0 ? '<b>' . htmlspecialchars($record['fails_desprendidos']) . '</b>' : htmlspecialchars($record['fails_desprendidos']) ?>
+                            </td>
+                            <td
+                              style="border-color: black; <?= $record['total_fails'] != 0 ? 'color:#FF0000; background-color: #FFCCCC;' : ''; ?>">
+                              <?= $record['total_fails'] != 0 ? '<b>' . htmlspecialchars($record['total_fails']) . '</b>' : htmlspecialchars($record['total_fails']) ?>
+                            </td>
+                            <td style="border-color: black; color:#000000;"><?= htmlspecialchars($record['total']) ?></td>
+                            <td style="border-color: black; color:#000000;"><?= htmlspecialchars($record['yield']) ?></td>
+                            <td style="border-color: black; color:#000000;"><?= htmlspecialchars($record['comments']) ?>
+                            </td>
+                            <td style="border-color: black; text-align:center;">
+                              <a href="edit_record_pcba.php?id_pcba=<?= $record['id_pcba']; ?>"
+                                class="btn btn-warning btn-sm edit <?php echo !$puedeEditar ? 'disabled-btn' : ''; ?>"><i
+                                  class="fas fa-edit"></i> Edit</a>
+                            </td>
+                          </tr>
+                        <?php endforeach; ?>
+                      <?php endif; ?>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+
+
+            </div>
+            <div class="pagination"
+              style="display: flex; justify-content: center; align-items: center; text-align: center; margin-top: 20px;">
+              <?php if ($current_page > 1): ?>
+                <a href="?page=<?= $current_page - 1 ?>" class="btn btn-primary" style="margin-right: 5px;">Previous</a>
+              <?php endif; ?>
+
+              <?php for ($i = 1; $i <= $total_pages; $i++): ?>
+                <a href="?page=<?= $i ?>" class="btn <?= $i === $current_page ? 'btn-info' : 'btn-secondary' ?>"
+                  style="margin-right: 5px;">
+                  <?= $i ?>
+                </a>
+              <?php endfor; ?>
+
+              <?php if ($current_page < $total_pages): ?>
+                <a href="?page=<?= $current_page + 1 ?>" class="btn btn-primary" style="margin-right: 5px;">Next</a>
+              <?php endif; ?>
+            </div>
+
+          </div>
+
+
+          <div class="modal fade" id="addRecordModal" tabindex="-1" aria-labelledby="addRecordModalLabel"
+            aria-hidden="true">
+            <div class="modal-dialog">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h5 class="modal-title" id="addRecordModalLabel">Add Record</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                  <form action="molexpcba.php" method="post">
+                    <?php
+
+                    $currentDate = date("Y-m-d");
+                    ?>
+
+                    <div class="mb-3">
+                      <label for="inspection_date" class="form-label">INSPECTION DATE</label>
+                      <input type="date" class="form-control" id="inspection_date" name="inspection_date"
+                        value="<?php echo $currentDate; ?>">
+                    </div>
+
+                    <div class="mb-3">
+                      <label for="description" class="form-label">DESCRIPTION</label>
+                      <textarea class="form-control" id="description" name="description"></textarea>
+                    </div>
+                    <div class="mb-3">
+                      <label for="shift" class="form-label">SHIFT</label>
+                      <select class="form-control" id="shift" name="shift">
+                        <option value="" disabled selected>Selecciona un turno</option>
+                        <?php
+
+                        $sql_turno = "SELECT p.id_turno 
+                  FROM proveedores p
+                  WHERE p.id_proveedor = :id_proveedor";
+
+                        $stmt_turno = $con->prepare($sql_turno);
+                        $stmt_turno->bindParam(':id_proveedor', $id_proveedor, PDO::PARAM_INT);
+                        $stmt_turno->execute();
+
+
+                        $turno = $stmt_turno->fetch(PDO::FETCH_ASSOC);
+                        $id_turno = $turno ? $turno['id_turno'] : null;
+
+
+                        if ($id_turno) {
+                          $sql_turno_nombre = "SELECT nombre_turno FROM turnos WHERE id_turno = :id_turno";
+                          $stmt_turno_nombre = $con->prepare($sql_turno_nombre);
+                          $stmt_turno_nombre->bindParam(':id_turno', $id_turno, PDO::PARAM_INT);
+                          $stmt_turno_nombre->execute();
+
+                          $turno_nombre = $stmt_turno_nombre->fetch(PDO::FETCH_ASSOC);
+                          $nombre_turno = $turno_nombre ? $turno_nombre['nombre_turno'] : 'No asignado';
+
+
+                          echo "<option value=\"$id_turno\" selected>$nombre_turno</option>";
+                        } else {
+
+                          echo "<option value=\"\" selected>No asignado</option>";
+                        }
+
+
+                        if (!$id_turno) {
+                          for ($i = 1; $i <= 10; $i++) {
+                            echo "<option value=\"$i\">Turno $i</option>";
+                          }
+                        }
+                        ?>
+                      </select>
+                    </div>
+
+
+                    <div class="mb-3">
+                      <label for="operators" class="form-label">OPERATORS</label>
+                      <textarea class="form-control" id="operators"
+                        name="operators"><?php echo htmlspecialchars($nombre . ' ' . $apellido); ?></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                      <label for="goods" class="form-label">GOODS</label>
+                      <select class="form-control" id="goods" name="goods">
+                        <option value="" disabled selected>Selecciona la cantidad</option>
+                        <?php for ($i = 1; $i <= 7000; $i++): ?>
+                          <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
+                        <?php endfor; ?>
+                      </select>
+                    </div>
+
+                    <div class="mb-3">
+                      <label for="fails_dedos_oro" class="form-label">DEDOS DE ORO CONTAMINADOS</label>
+                      <select class="form-control" id="fails_dedos_oro" name="fails_dedos_oro">
+                        <option value="0" selected>0</option>
+                        <?php for ($i = 1; $i <= 1000; $i++): ?>
+                          <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
+                        <?php endfor; ?>
+                      </select>
+                    </div>
+
+                    <div class="mb-3">
+                      <label for="fails_mal_corte" class="form-label">MAL CORTE</label>
+                      <select class="form-control" id="fails_mal_corte" name="fails_mal_corte">
+                        <option value="0" selected>0</option>
+                        <?php for ($i = 1; $i <= 1000; $i++): ?>
+                          <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
+                        <?php endfor; ?>
+                      </select>
+                    </div>
+
+                    <div class="mb-3">
+                      <label for="fails_contaminacion" class="form-label">CONTAMINACION</label>
+                      <select class="form-control" id="fails_contaminacion" name="fails_contaminacion">
+                        <option value="0" selected>0</option>
+                        <?php for ($i = 1; $i <= 1000; $i++): ?>
+                          <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
+                        <?php endfor; ?>
+                      </select>
+                    </div>
+
+                    <div class="mb-3">
+                      <label for="pd" class="form-label">PD</label>
+                      <select class="form-control" id="pd" name="pd">
+                        <option value="0" selected>0</option>
+                        <?php for ($i = 1; $i <= 1000; $i++): ?>
+                          <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
+                        <?php endfor; ?>
+                      </select>
+                    </div>
+
+                    <div class="mb-3">
+                      <label for="fails_desplazados" class="form-label">DESPLAZADOS</label>
+                      <select class="form-control" id="fails_desplazados" name="fails_desplazados">
+                        <option value="0" selected>0</option>
+                        <?php for ($i = 1; $i <= 1000; $i++): ?>
+                          <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
+                        <?php endfor; ?>
+                      </select>
+                    </div>
+
+                    <div class="mb-3">
+                      <label for="fails_insuficiencias" class="form-label">INSUFICIENCIAS</label>
+                      <select class="form-control" id="fails_insuficiencias" name="fails_insuficiencias">
+                        <option value="0" selected>0</option>
+                        <?php for ($i = 1; $i <= 1000; $i++): ?>
+                          <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
+                        <?php endfor; ?>
+                      </select>
+                    </div>
+
+                    <div class="mb-3">
+                      <label for="fails_despanelizados" class="form-label">DESPANELIZADOS</label>
+                      <select class="form-control" id="fails_despanelizados" name="fails_despanelizados">
+                        <option value="0" selected>0</option>
+                        <?php for ($i = 1; $i <= 1000; $i++): ?>
+                          <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
+                        <?php endfor; ?>
+                      </select>
+                    </div>
+
+                    <div class="mb-3">
+                      <label for="fails_desprendidos" class="form-label">DESPRENDIDOS</label>
+                      <select class="form-control" id="fails_desprendidos" name="fails_desprendidos">
+                        <option value="0" selected>0</option>
+                        <?php for ($i = 1; $i <= 1000; $i++): ?>
+                          <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
+                        <?php endfor; ?>
+                      </select>
+                    </div>
+
+                    <div class="mb-3">
+                      <label for="total_fails" class="form-label">Total</label>
+                      <input type="number" class="form-control" id="total_fails" name="total_fails">
+                    </div>
+                    <div class="mb-3">
+                      <label for="total" class="form-label">Total</label>
+                      <input type="number" class="form-control" id="total" name="total" required readonly>
+                    </div>
+                    <div class="mb-3">
+                      <label for="yield" class="form-label">Yield (%)</label>
+                      <input type="text" class="form-control" id="yield" name="yield" required readonly>
+                    </div>
+                    <div class="mb-3">
+                      <label for="comments" class="form-label">Comments</label>
+                      <textarea class="form-control" id="comments" name="comments"></textarea>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                      <button type="submit" class="btn btn-primary">Save</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </div>
+
+
+
+
+
+          <br><br><br><br><br><br><br><br>
+          <footer class="content-footer footer bg-footer-theme">
+            <div class="container-xxl d-flex flex-column flex-md-row justify-content-center py-2">
+              <div class="mb-2 mb-md-0 text-center text-md-start">
+                ©
+                <script>
+                  document.write(new Date().getFullYear());
+                </script>
+                , Comter
+                <a href="#" class="footer-link fw-bolder">Osdems Digital Group</a>
+              </div>
+            </div>
+          </footer>
+
+          <div class="content-backdrop fade"></div>
+        </div>
+
+      </div>
+
+    </div>
+
+
+    <div class="layout-overlay layout-menu-toggle"></div>
+  </div>
+
+
+
+
+
+  <script src="../../assets/vendor/libs/jquery/jquery.js"></script>
+  <script src="../../assets/vendor/libs/popper/popper.js"></script>
+  <script src="../../assets/vendor/js/bootstrap.js"></script>
+  <script src="../../assets/vendor/libs/perfect-scrollbar/perfect-scrollbar.js"></script>
+  <script src="../../assets/vendor/js/menu.js"></script>
+  <script src="../../assets/vendor/libs/apex-charts/apexcharts.js"></script>
+  <script src="../../assets/js/main.js"></script>
+  <script src="../../assets/js/dashboards-analytics.js"></script>
+  <script async defer src="https://buttons.github.io/buttons.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js"></script>
+
+  <script>
+    function confirmLogout() {
+      Swal.fire({
+        title: '¿Estás seguro?',
+        text: '¿Quieres cerrar la sesión?',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, cerrar sesión',
+        cancelButtonText: 'Cancelar'
+      }).then((result) => {
+        if (result.isConfirmed) {
+          window.location.href = '../backend/home/logout.php';
+        }
+      });
+    }
+  </script>
+  <script>
+    function updateTotalInspectedAndYield() {
+
+
+      const failsDedosOro = parseFloat(document.getElementById('fails_dedos_oro').value) || 0;
+      const failsMalCorte = parseFloat(document.getElementById('fails_mal_corte').value) || 0;
+      const failsContaminacion = parseFloat(document.getElementById('fails_contaminacion').value) || 0;
+      const pd = parseFloat(document.getElementById('pd').value) || 0;
+      const failsDesplazados = parseFloat(document.getElementById('fails_desplazados').value) || 0;
+      const failsInsuficiencias = parseFloat(document.getElementById('fails_insuficiencias').value) || 0;
+      const failsDespanelizados = parseFloat(document.getElementById('fails_despanelizados').value) || 0;
+      const failsDesprendidos = parseFloat(document.getElementById('fails_desprendidos').value) || 0;
+
+
+      const goods = parseFloat(document.getElementById('goods').value) || 0;
+
+
+      const totalFails = failsDedosOro + failsMalCorte + failsContaminacion + pd + failsDesplazados + failsInsuficiencias + failsDespanelizados + failsDesprendidos;
+
+
+      document.getElementById('total_fails').value = totalFails;
+
+
+      const totalInspected = goods + totalFails;
+
+
+      let yieldPercentage = 0;
+      if (totalInspected > 0) {
+        yieldPercentage = Math.round((goods / totalInspected) * 100);
+      }
+
+
+      document.getElementById('total').value = totalInspected;
+      document.getElementById('yield').value = yieldPercentage + '%';
+    }
+
+
+    document.getElementById('fails_dedos_oro').addEventListener('input', updateTotalInspectedAndYield);
+    document.getElementById('fails_mal_corte').addEventListener('input', updateTotalInspectedAndYield);
+    document.getElementById('fails_contaminacion').addEventListener('input', updateTotalInspectedAndYield);
+    document.getElementById('pd').addEventListener('input', updateTotalInspectedAndYield);
+    document.getElementById('fails_desplazados').addEventListener('input', updateTotalInspectedAndYield);
+    document.getElementById('fails_insuficiencias').addEventListener('input', updateTotalInspectedAndYield);
+    document.getElementById('fails_despanelizados').addEventListener('input', updateTotalInspectedAndYield);
+    document.getElementById('fails_desprendidos').addEventListener('input', updateTotalInspectedAndYield);
+    document.getElementById('goods').addEventListener('input', updateTotalInspectedAndYield);
+
+
+    updateTotalInspectedAndYield();
+  </script>
+
+
+
+  <script>
+    /*document.addEventListener('DOMContentLoaded', function () {
+      var table = document.getElementById('inspectionTable');
+      var exportButton = document.getElementById('exportButton');
+
+      var rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+      var hasRecords = rows.length > 0 && rows[0].getElementsByTagName('td').length > 1;
+
+      exportButton.disabled = !hasRecords;
+    });*/
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const resetButton = document.getElementById("resetFilters");
+      const filterDate = document.getElementById("filter_date");
+      const filterDescription = document.getElementById("filter_description");
+      const filterShift = document.getElementById("filter_shift");
+      const filterOperators = document.getElementById("filter_operators");
+      const filterGoods = document.getElementById("filter_goods");
+      const filterDedosOro = document.getElementById("filter_dedos_oro");
+      const filterMalCorte = document.getElementById("filter_mal_corte");
+      const filterContaminacion = document.getElementById("filter_contaminacion");
+      const filterPd = document.getElementById("filter_pd");
+      const filterDesplazados = document.getElementById("filter_desplazados");
+      const filterInsuficiencias = document.getElementById("filter_insuficiencias");
+      const filterDespanelizados = document.getElementById("filter_despanelizados");
+      const filterDesprendidos = document.getElementById("filter_desprendidos");
+      const filterTotal = document.getElementById("filter_total");
+      const filterTotalFinal = document.getElementById("filter_total_final");
+      const filterYield = document.getElementById("filter_yield");
+      const filterComments = document.getElementById("filter_comments");
+
+      const tableRows = document.querySelectorAll("#inspectionTable tbody tr");
+
+      function filterTable() {
+        tableRows.forEach(row => {
+          let showRow = true;
+
+
+          if (filterDate.value) {
+            const rowDate = row.cells[0].textContent.trim();
+            if (rowDate !== filterDate.value) {
+              showRow = false;
+            }
+          }
+
+
+          if (filterDescription.value && !row.cells[1].textContent.includes(filterDescription.value)) {
+            showRow = false;
+          }
+
+
+          const turnoValue = filterShift.value;
+          if (turnoValue !== "all" && turnoValue) {
+            const turno = row.cells[2].textContent.trim();
+            if (!turno.includes(turnoValue)) {
+              showRow = false;
+            }
+          }
+
+
+          if (filterOperators.value && !row.cells[3].textContent.includes(filterOperators.value)) {
+            showRow = false;
+          }
+
+
+          if (filterGoods.value && !row.cells[4].textContent.includes(filterGoods.value)) {
+            showRow = false;
+          }
+          if (filterDedosOro.value && !row.cells[5].textContent.includes(filterDedosOro.value)) {
+            showRow = false;
+          }
+          if (filterMalCorte.value && !row.cells[6].textContent.includes(filterMalCorte.value)) {
+            showRow = false;
+          }
+          if (filterContaminacion.value && !row.cells[7].textContent.includes(filterContaminacion.value)) {
+            showRow = false;
+          }
+          if (filterPd.value && !row.cells[8].textContent.includes(filterPd.value)) {
+            showRow = false;
+          }
+          if (filterDesplazados.value && !row.cells[9].textContent.includes(filterDesplazados.value)) {
+            showRow = false;
+          }
+          if (filterInsuficiencias.value && !row.cells[10].textContent.includes(filterInsuficiencias.value)) {
+            showRow = false;
+          }
+          if (filterDespanelizados.value && !row.cells[11].textContent.includes(filterDespanelizados.value)) {
+            showRow = false;
+          }
+          if (filterDesprendidos.value && !row.cells[12].textContent.includes(filterDesprendidos.value)) {
+            showRow = false;
+          }
+          if (filterTotal.value && !row.cells[13].textContent.includes(filterTotal.value)) {
+            showRow = false;
+          }
+          if (filterTotalFinal.value && !row.cells[14].textContent.includes(filterTotalFinal.value)) {
+            showRow = false;
+          }
+          if (filterYield.value && !row.cells[15].textContent.includes(filterYield.value)) {
+            showRow = false;
+          }
+          if (filterComments.value && !row.cells[16].textContent.includes(filterComments.value)) {
+            showRow = false;
+          }
+
+
+          if (showRow) {
+            row.style.display = "";
+          } else {
+            row.style.display = "none";
+          }
+        });
+      }
+
+
+      resetButton.addEventListener("click", function () {
+        filterDate.value = '';
+        filterDescription.value = '';
+        filterShift.value = 'all';
+        filterOperators.value = '';
+        filterGoods.value = '';
+        filterDedosOro.value = '';
+        filterMalCorte.value = '';
+        filterContaminacion.value = '';
+        filterPd.value = '';
+        filterDesplazados.value = '';
+        filterInsuficiencias.value = '';
+        filterDespanelizados.value = '';
+        filterDesprendidos.value = '';
+        filterTotal.value = '';
+        filterTotalFinal.value = '';
+        filterYield.value = '';
+        filterComments.value = '';
+
+        filterTable();
+      });
+
+
+      filterDate.addEventListener("input", filterTable);
+      filterDescription.addEventListener("change", filterTable);
+      filterShift.addEventListener("change", filterTable);
+      filterOperators.addEventListener("change", filterTable);
+      filterGoods.addEventListener("change", filterTable);
+      filterDedosOro.addEventListener("change", filterTable);
+      filterMalCorte.addEventListener("change", filterTable);
+      filterContaminacion.addEventListener("change", filterTable);
+      filterPd.addEventListener("change", filterTable);
+      filterDesplazados.addEventListener("change", filterTable);
+      filterInsuficiencias.addEventListener("change", filterTable);
+      filterDespanelizados.addEventListener("change", filterTable);
+      filterDesprendidos.addEventListener("change", filterTable);
+      filterTotal.addEventListener("change", filterTable);
+      filterTotalFinal.addEventListener("change", filterTable);
+      filterYield.addEventListener("change", filterTable);
+      filterComments.addEventListener("change", filterTable);
+
+
+      flatpickr("#filter_date", {
+        dateFormat: "Y-m-d",
+        onChange: function (selectedDates, dateStr, instance) {
+          filterTable();
+        }
+      });
+
+
+      filterTable();
+    });
+  </script>
+
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+
+      const puedeEditar = <?php echo json_encode($puedeEditar); ?>;
+      const puedeCapturar = <?php echo json_encode($puedeCapturar); ?>;
+
+
+      const addRecordBtn = document.querySelector('.add');
+      if (!puedeCapturar && addRecordBtn) {
+        addRecordBtn.classList.add('disabled-btn');
+      }
+
+
+      const editBtns = document.querySelectorAll('.edit');
+      editBtns.forEach(function (editBtn) {
+        if (!puedeEditar) {
+          editBtn.classList.add('disabled-btn');
+        }
+      });
+    });
+
+  </script>
+
+
+
+
+
+
+</body>
+
+</html>

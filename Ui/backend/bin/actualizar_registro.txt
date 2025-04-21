@@ -1,0 +1,75 @@
+<?php
+session_start();
+error_reporting(0);
+header('Content-Type: application/json');
+
+require_once '../../config/connection.php';
+
+if (!isset($_SESSION['id_administrador'])) {
+    echo json_encode(['error' => 'No tiene autorización para realizar esta acción']);
+    exit();
+}
+
+try {
+    $db = new Database();
+    $con = $db->conectar();
+
+    // Obtener el ID y el correo actual del proveedor
+    $id_proveedor = $_POST['id_proveedor'];
+    $nuevo_correo = $_POST['correo'];
+
+    // Verificar si el correo ya existe antes de intentar la actualización
+    $sqlVerificar = "SELECT COUNT(*) FROM proveedores WHERE correo = :correo AND id_proveedor != :id_proveedor";
+    $stmtVerificar = $con->prepare($sqlVerificar);
+    $stmtVerificar->bindValue(':correo', $nuevo_correo);
+    $stmtVerificar->bindValue(':id_proveedor', $id_proveedor);
+    $stmtVerificar->execute();
+    
+    if ($stmtVerificar->fetchColumn() > 0) {
+        // Si el correo ya existe, enviar mensaje de error
+        echo json_encode([
+            'error' => true, 
+            'message' => 'El correo electrónico ya está registrado. Por favor, use un correo diferente.'
+        ]);
+        exit();
+    }
+
+    // Si el correo no existe, proceder con la actualización
+    $sql = "UPDATE proveedores SET 
+            compania = :compania,
+            business_unit = :business_unit,
+            nombre = :nombre,
+            apellido = :apellido,
+            telefono = :telefono,
+            correo = :correo,
+            departamento = :departamento,
+            puesto = :puesto
+            WHERE id_proveedor = :id_proveedor";
+
+    $stmt = $con->prepare($sql);
+    
+    $stmt->bindValue(':compania', $_POST['compania']);
+    $stmt->bindValue(':business_unit', $_POST['business_unit']);
+    $stmt->bindValue(':nombre', $_POST['nombre']);
+    $stmt->bindValue(':apellido', $_POST['apellido']);
+    $stmt->bindValue(':telefono', $_POST['telefono']);
+    $stmt->bindValue(':correo', $nuevo_correo);
+    $stmt->bindValue(':departamento', $_POST['departamento']);
+    $stmt->bindValue(':puesto', $_POST['puesto']);
+    $stmt->bindValue(':id_proveedor', $id_proveedor);
+
+    if ($stmt->execute()) {
+        if (!isset($_SESSION['mensaje'])) {
+            $_SESSION['mensaje'] = "Registro actualizado correctamente";
+            $_SESSION['tipo_mensaje'] = "success";
+        }
+        echo json_encode(['success' => true, 'message' => $_SESSION['mensaje']]);
+    } else {
+        throw new Exception("Error al actualizar el registro");
+    }
+
+} catch (Exception $e) {
+    $_SESSION['mensaje'] = "Error: " . $e->getMessage();
+    $_SESSION['tipo_mensaje'] = "error";
+    echo json_encode(['error' => true, 'message' => $e->getMessage()]);
+}

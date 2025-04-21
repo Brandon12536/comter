@@ -1,0 +1,152 @@
+<?php
+session_start();
+
+require '../config/connection.php';
+require '../phpmailer/src/Exception.php';
+require '../phpmailer/src/PHPMailer.php';
+require '../phpmailer/src/SMTP.php';
+
+$db = new Database();
+$con = $db->conectar();
+$con->exec("SET NAMES 'utf8'");
+
+$correos_permitidos = ['armando@comtermexico.com', 'daniel@comtermexico.com', 'excitingnobel7@tomorjerry.com'];
+$correos_permitidos = array_map('strtolower', $correos_permitidos);
+
+$nombre = $_POST['nombre'];
+$apellido = $_POST['apellido'];
+$compania = $_POST['compania'];
+$business_unit = $_POST['business_unit'];
+$telefono = $_POST['telefono'];
+$correo = strtolower(trim($_POST['correo']));
+$password = $_POST['password'];
+
+if (empty($nombre) || empty($apellido) || empty($compania) || empty($business_unit) || empty($telefono) || empty($correo) || empty($password)) {
+    echo json_encode(['success' => false, 'message' => 'Todos los campos son obligatorios.']);
+    exit;
+}
+
+if (!in_array($correo, $correos_permitidos)) {
+    echo json_encode(['success' => false, 'message' => 'No tienes los permisos para registrarte como administrador.']);
+    exit;
+}
+
+$sql_check = "SELECT id_administrador FROM administrador WHERE correo = :correo";
+$stmt_check = $con->prepare($sql_check);
+$stmt_check->bindParam(':correo', $correo);
+$stmt_check->execute();
+
+if ($stmt_check->fetch(PDO::FETCH_ASSOC)) {
+    echo json_encode(['success' => false, 'message' => 'El administrador ya está registrado.']);
+    exit;
+}
+
+$hashed_password = password_hash($password, PASSWORD_DEFAULT);
+$codigo_verificacion = strtoupper(substr(md5(uniqid(rand(), true)), 0, 4));
+
+try {
+    $sql_insert = "INSERT INTO administrador (nombre, apellido, compania, business_unit, telefono, correo, codigo_verificacion, password, verificado, role)
+                   VALUES (:nombre, :apellido, :compania, :business_unit, :telefono, :correo, :codigo_verificacion, :password, 0, 'Administrador')";
+    $stmt_insert = $con->prepare($sql_insert);
+    $stmt_insert->bindParam(':nombre', $nombre);
+    $stmt_insert->bindParam(':apellido', $apellido);
+    $stmt_insert->bindParam(':compania', $compania);
+    $stmt_insert->bindParam(':business_unit', $business_unit);
+    $stmt_insert->bindParam(':telefono', $telefono);
+    $stmt_insert->bindParam(':correo', $correo);
+    $stmt_insert->bindParam(':codigo_verificacion', $codigo_verificacion);
+    $stmt_insert->bindParam(':password', $hashed_password);
+    $stmt_insert->execute();
+
+    $id_administrador = $con->lastInsertId();
+    $_SESSION['id_administrador'] = $id_administrador;
+    $_SESSION['correo'] = $correo;
+
+    $mail = new PHPMailer\PHPMailer\PHPMailer();
+    try {
+        $mail->isSMTP();
+        $mail->SMTPAuth = true;
+        $mail->SMTPSecure = 'tls';
+        $mail->Host = 'smtp.gmail.com';
+        $mail->Port = 587;
+        $mail->Username = 'bp754509@gmail.com';
+        $mail->Password = 'qkse ycth akvp iqpa';
+
+        $mail->setFrom('bp754509@gmail.com', 'COMTER');
+        $mail->addAddress($correo);
+        $mail->Subject = 'Código de Verificación';
+        $mail->isHTML(true);
+        $mail->CharSet = 'UTF-8';
+        $mail->AddEmbeddedImage('../ico/comter.png', 'logo_comter');
+
+        $mail->Body = "
+        <html>
+        <head>
+          <style>
+            body {
+              background-color: #1b419b;
+              margin: 0;
+              padding: 0;
+              height: 100%;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              text-align: center;
+              color: white;
+              font-family: Arial, sans-serif;
+            }
+            .contenido {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              text-align: center;
+              color: white; 
+              max-width: 600px; 
+            }
+            .codigo-container {
+              margin-top: 30px;
+            }
+            .codigo {
+              font-size: 48px;
+              font-weight: bold;
+              margin-top: 20px;
+            }
+            .imagen-container {
+              margin-bottom: 20px;
+            }
+            img {
+              width: 120px; 
+              height: 120px; 
+              object-fit: contain; 
+            }
+          </style>
+        </head>
+        <body style='background-color: #1b419b; margin: 0; padding: 0; height: 100%;'>
+          <div class='contenido'>
+            <div class='imagen-container'>
+              <img src='cid:logo_comter' alt='Comter Logo'>
+            </div>
+            <div class='codigo-container'>
+              <p>Tu código de verificación es:</p>
+              <div class='codigo'>$codigo_verificacion</div>
+              <p>Este código caduca una vez que lo ingreses en el formulario.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+        ";
+
+        if ($mail->send()) {
+            echo json_encode(['success' => true, 'message' => 'Correo enviado exitosamente.']);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Error al enviar el correo']);
+        }
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => 'Error al enviar el correo: ' . $mail->ErrorInfo]);
+    }
+} catch (PDOException $e) {
+    echo json_encode(['success' => false, 'message' => 'Error en la base de datos: ' . $e->getMessage()]);
+}
+
+$con = null;

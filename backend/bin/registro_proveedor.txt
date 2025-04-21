@@ -1,0 +1,101 @@
+<?php
+session_start();
+
+// Incluir archivos de PHPMailer
+require '../config/connection.php';
+require '../phpmailer/src/Exception.php';
+require '../phpmailer/src/PHPMailer.php';
+require '../phpmailer/src/SMTP.php';
+
+// Conexión a la base de datos usando PDO
+$db = new Database();
+$con = $db->conectar();
+
+// Lista de correos permitidos
+$correos_permitidos = ['armando@comtermexico.com', 'ale@comtermexico.com', 'daniel@comtermexico.com', 'bp754509@gmail.com'];
+
+// Recibir los datos del formulario
+$nombre = $_POST['nombre'];
+$apellido = $_POST['apellido'];
+$compania = $_POST['compania'];
+$business_unit = $_POST['business_unit'];
+$telefono = $_POST['telefono'];
+$correo = $_POST['correo'];
+
+// Verificar si el correo está permitido
+if (in_array($correo, $correos_permitidos)) {
+    $_SESSION['correo'] = $correo;
+    $codigo_verificacion = strtoupper(substr(md5(uniqid(rand(), true)), 0, 4));
+
+    try {
+        // Verificar si el correo ya está en la base de datos
+        $sql_check = "SELECT id_proveedor, telefono FROM proveedores WHERE correo = :correo";
+        $stmt_check = $con->prepare($sql_check);
+        $stmt_check->bindParam(':correo', $correo);
+        $stmt_check->execute();
+        
+        $result = $stmt_check->fetch(PDO::FETCH_ASSOC);
+
+        if ($result) {
+            // Actualizamos el código de verificación si ya existe
+            $sql_update = "UPDATE proveedores SET codigo_verificacion = :codigo_verificacion WHERE correo = :correo";
+            $stmt_update = $con->prepare($sql_update);
+            $stmt_update->bindParam(':codigo_verificacion', $codigo_verificacion);
+            $stmt_update->bindParam(':correo', $correo);
+            $stmt_update->execute();
+            
+            $telefono_cliente = $result['telefono'];
+        } else {
+            // Insertamos el registro si no existe
+            $sql_insert = "INSERT INTO proveedores (nombre, apellido, compania, business_unit, telefono, correo, codigo_verificacion)
+                            VALUES (:nombre, :apellido, :compania, :business_unit, :telefono, :correo, :codigo_verificacion)";
+            $stmt_insert = $con->prepare($sql_insert);
+            $stmt_insert->bindParam(':nombre', $nombre);
+            $stmt_insert->bindParam(':apellido', $apellido);
+            $stmt_insert->bindParam(':compania', $compania);
+            $stmt_insert->bindParam(':business_unit', $business_unit);
+            $stmt_insert->bindParam(':telefono', $telefono);
+            $stmt_insert->bindParam(':correo', $correo);
+            $stmt_insert->bindParam(':codigo_verificacion', $codigo_verificacion);
+            $stmt_insert->execute();
+            
+            $telefono_cliente = $telefono;
+        }
+
+        // Enviar el correo con el código de verificación usando PHPMailer
+        $mail = new PHPMailer\PHPMailer\PHPMailer();
+        try {
+            $mail->isSMTP();
+            $mail->SMTPAuth = true;
+            $mail->SMTPSecure = 'tls';
+            $mail->Host = 'smtp.gmail.com';
+            $mail->Port = 587;
+            $mail->Username = 'bp754509@gmail.com';
+            $mail->Password = 'qkse ycth akvp iqpa';
+
+            $mail->setFrom('bp754509@gmail.com', 'COMTER');
+            $mail->addAddress($correo);
+            $mail->Subject = 'Código de Verificación';
+            $mail->Body = "Tu código de verificación es: $codigo_verificacion\n\nEste código caduca una vez que lo ingreses en el siguiente formulario para completar tu registro.";
+
+            if ($mail->send()) {
+                $whatsapp_url = "https://wa.me/$telefono_cliente?text=Tu%20c%C3%B3digo%20de%20verificaci%C3%B3n%20es%20$codigo_verificacion.%20Este%20c%C3%B3digo%20caduca%20una%20vez%20que%20lo%20ingreses%20en%20el%20formulario%20para%20completar%20tu%20registro.";
+
+                // Devolver la respuesta en formato JSON
+                echo json_encode(['success' => true, 'whatsapp_url' => $whatsapp_url]);
+            } else {
+                echo json_encode(['success' => false, 'message' => 'Error al enviar el correo']);
+            }
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'message' => 'Error al enviar el correo: ' . $mail->ErrorInfo]);
+        }
+    } catch (PDOException $e) {
+        echo json_encode(['success' => false, 'message' => 'Error en la base de datos: ' . $e->getMessage()]);
+    }
+} else {
+    echo json_encode(['success' => false, 'message' => 'Este correo no tiene acceso al sistema']);
+}
+
+// Cerrar la conexión PDO
+$con = null;
+?>

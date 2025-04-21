@@ -1,0 +1,139 @@
+<?php
+session_start();
+
+header('Content-Type: application/json');
+
+require_once '../../config/connection.php';
+
+if (!isset($_SESSION['id_administrador'])) {
+    echo json_encode(['error' => 'No tiene autorización para realizar esta acción']);
+    exit();
+}
+
+if (!isset($_GET['id'])) {
+    echo json_encode(['error' => 'No se proporcionó un ID válido']);
+    exit();
+}
+
+try {
+    $db = new Database();
+    $con = $db->conectar();
+    
+    
+    $registrosRelacionados = [];
+    
+  
+    $sqlPCBA = "SELECT COUNT(*) as total FROM PCBA WHERE user_id = :id";
+    $stmtPCBA = $con->prepare($sqlPCBA);
+    $stmtPCBA->bindParam(':id', $_GET['id'], PDO::PARAM_INT);
+    $stmtPCBA->execute();
+    $totalPCBA = $stmtPCBA->fetch(PDO::FETCH_ASSOC)['total'];
+    if ($totalPCBA > 0) {
+        $registrosRelacionados['PCBA'] = $totalPCBA;
+    }
+    
+  
+    $sqlMolex = "SELECT COUNT(*) as total FROM molex WHERE id_proveedor = :id";
+    $stmtMolex = $con->prepare($sqlMolex);
+    $stmtMolex->bindParam(':id', $_GET['id'], PDO::PARAM_INT);
+    $stmtMolex->execute();
+    $totalMolex = $stmtMolex->fetch(PDO::FETCH_ASSOC)['total'];
+    if ($totalMolex > 0) {
+        $registrosRelacionados['Molex'] = $totalMolex;
+    }
+    
+    
+    $sqlInspecciones = "SELECT COUNT(*) as total FROM inspecciones WHERE id_proveedor = :id";
+    $stmtInspecciones = $con->prepare($sqlInspecciones);
+    $stmtInspecciones->bindParam(':id', $_GET['id'], PDO::PARAM_INT);
+    $stmtInspecciones->execute();
+    $totalInspecciones = $stmtInspecciones->fetch(PDO::FETCH_ASSOC)['total'];
+    if ($totalInspecciones > 0) {
+        $registrosRelacionados['Inspecciones'] = $totalInspecciones;
+    }
+    
+ 
+    $sqlMateriales = "SELECT COUNT(*) as total FROM materiales WHERE id_proveedor = :id";
+    $stmtMateriales = $con->prepare($sqlMateriales);
+    $stmtMateriales->bindParam(':id', $_GET['id'], PDO::PARAM_INT);
+    $stmtMateriales->execute();
+    $totalMateriales = $stmtMateriales->fetch(PDO::FETCH_ASSOC)['total'];
+    if ($totalMateriales > 0) {
+        $registrosRelacionados['Materiales'] = $totalMateriales;
+    }
+    
+    
+    if (!empty($registrosRelacionados)) {
+        $mensaje = "¡Advertencia! Al eliminar este usuario también se eliminarán los siguientes registros:\n";
+        foreach ($registrosRelacionados as $tabla => $total) {
+            $mensaje .= "- $tabla: $total registros\n";
+        }
+        
+        echo json_encode([
+            'warning' => true,
+            'message' => $mensaje,
+            'registros' => $registrosRelacionados
+        ]);
+        exit();
+    }
+    
+   
+    $sqlGetTurnos = "SELECT DISTINCT t.id_turno, t.nombre_turno 
+                     FROM proveedores p 
+                     JOIN turnos t ON p.id_turno = t.id_turno 
+                     WHERE p.id_proveedor = :id";
+    $stmtGetTurnos = $con->prepare($sqlGetTurnos);
+    $stmtGetTurnos->bindParam(':id', $_GET['id'], PDO::PARAM_INT);
+    $stmtGetTurnos->execute();
+    $turnosData = $stmtGetTurnos->fetchAll(PDO::FETCH_ASSOC);
+    
+   
+    $con->beginTransaction();
+   
+    
+    $sqlPermisos = "DELETE FROM roles_permisos WHERE id_proveedor = :id";
+    $stmtPermisos = $con->prepare($sqlPermisos);
+    $stmtPermisos->bindParam(':id', $_GET['id'], PDO::PARAM_INT);
+    $stmtPermisos->execute();
+    
+    
+    $sqlProveedor = "DELETE FROM proveedores WHERE id_proveedor = :id";
+    $stmtProveedor = $con->prepare($sqlProveedor);
+    $stmtProveedor->bindParam(':id', $_GET['id'], PDO::PARAM_INT);
+    $stmtProveedor->execute();
+    
+    
+    foreach ($turnosData as $turno) {
+        $sqlCheckTurno = "SELECT COUNT(*) as count 
+                         FROM proveedores 
+                         WHERE id_turno = :id_turno";
+        $stmtCheckTurno = $con->prepare($sqlCheckTurno);
+        $stmtCheckTurno->bindParam(':id_turno', $turno['id_turno'], PDO::PARAM_INT);
+        $stmtCheckTurno->execute();
+        $countResult = $stmtCheckTurno->fetch(PDO::FETCH_ASSOC);
+        
+        if ($countResult['count'] == 0) {
+            $sqlTurno = "DELETE FROM turnos 
+                        WHERE id_turno = :id_turno 
+                        AND nombre_turno IN ('1er.', '2do.', '3er.')";
+            $stmtTurno = $con->prepare($sqlTurno);
+            $stmtTurno->bindParam(':id_turno', $turno['id_turno'], PDO::PARAM_INT);
+            $stmtTurno->execute();
+        }
+    }
+
+    $con->commit();
+    
+    echo json_encode([
+        'success' => true,
+        'message' => 'Registro eliminado correctamente'
+    ]);
+
+} catch (Exception $e) {
+    if ($con->inTransaction()) {
+        $con->rollBack();
+    }
+    echo json_encode([
+        'error' => 'Error al eliminar el registro: ' . $e->getMessage()
+    ]);
+}
