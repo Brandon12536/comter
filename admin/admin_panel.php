@@ -813,7 +813,7 @@ foreach ($versions as $version) {
             </a>
         </li>-->
         <li class="menu-item active">
-    <a href="semanas.php" class="menu-link">
+    <a href="frontend/semanas.php" class="menu-link">
         <i class="menu-icon tf-icons bx bx-calendar-week"></i>
         <div data-i18n="Analytics">Nuevo Reporte</div>
     </a>
